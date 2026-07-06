@@ -1115,6 +1115,7 @@ static std::vector<std::string> s_Preset_print_options{
     "top_surface_filament_id",
     "bottom_surface_filament_id",
     "support_filament",
+    "support_nozzle_diameter",
     "support_interface_filament",
     "support_interface_not_for_body",
     "ooze_prevention",
@@ -1174,6 +1175,9 @@ static std::vector<std::string> s_Preset_print_options{
     "precise_z_height",
     "infill_combination",
     "infill_combination_max_layer_height", /*"adaptive_layer_height",*/
+    // ORCA: per-extruder layer height ("extruder_layer_height").
+    "extruder_layer_height_mode",
+    "extruder_layer_height_tolerance",
     "support_bottom_interface_spacing",
     "enable_overhang_speed",
     "slowdown_for_curled_perimeters",

@@ -23,19 +23,19 @@ Flow LayerRegion::flow(FlowRole role) const
     return this->flow(role, m_layer->height);
 }
 
-Flow LayerRegion::flow(FlowRole role, double layer_height) const
+Flow LayerRegion::flow(FlowRole role, double layer_height, unsigned int filament_id) const
 {
-    return m_region->flow(*m_layer->object(), role, layer_height, m_layer->id() == 0);
+    return m_region->flow(*m_layer->object(), role, layer_height, m_layer->id() == 0, filament_id);
 }
 
-Flow LayerRegion::bridging_flow(FlowRole role, bool thick_bridge) const
+Flow LayerRegion::bridging_flow(FlowRole role, bool thick_bridge, unsigned int filament_id, double layer_height) const
 {
     const PrintRegion       &region         = this->region();
     const PrintRegionConfig &region_config  = region.config();
     const PrintObject       &print_object   = *this->layer()->object();
     Flow bridge_flow;
     // Here this->extruder(role) - 1 may underflow to MAX_INT, but then the get_at() will fall back to zero'th element, so everything is all right.
-    auto nozzle_diameter = float(print_object.print()->config().nozzle_diameter.get_at(region.extruder(role) - 1));
+    auto nozzle_diameter = float(print_object.print()->config().nozzle_diameter.get_at((filament_id > 0 ? filament_id : region.extruder(role)) - 1));
     const ConfigOptionFloatOrPercent& bridge_width_opt = region_config.bridge_line_width;
     const double                      bridge_width      = bridge_width_opt.get_abs_value(nozzle_diameter);
     const bool                        has_bridge_width  = bridge_width > 0.;
@@ -50,7 +50,7 @@ Flow LayerRegion::bridging_flow(FlowRole role, bool thick_bridge) const
         bridge_flow = Flow::bridging_flow(thread_diameter, nozzle_diameter);
     } else {
         // The same way as other slicers: Use normal extrusions. Apply bridge_flow while maintaining the original spacing.
-        Flow base_flow = this->flow(role);
+        Flow base_flow = this->flow(role, layer_height > 0. ? layer_height : m_layer->height, filament_id);
         if (has_bridge_width)
             base_flow = Flow(float(bridge_width), base_flow.height(), nozzle_diameter);
         bridge_flow = base_flow.with_flow_ratio(bridge_flow_ratio);
@@ -99,19 +99,22 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         model_rotation_rad = std::atan2((double)m(1, 0), (double)m(0, 0));
     }
 
+    // ORCA: on the top layer of a combined group all perimeters extrude with the whole group's height.
+    const double perimeter_height = this->combined_height();
+
     PerimeterGenerator g(
         // input:
         &slices,
         &compatible_regions,
-        this->layer()->height,
+        perimeter_height,
         this->layer()->slice_z,
-        this->flow(frPerimeter),
+        this->flow(frPerimeter, perimeter_height),
         &region_config,
         &this->layer()->object()->config(),
         &print_config,
         spiral_mode,
         model_rotation_rad,
-        
+
         // output:
         &this->perimeters,
         &this->thin_fills,
@@ -119,10 +122,11 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         //BBS
         fill_no_overlap
     );
-    
-    if (this->layer()->lower_layer != nullptr)
+
+    // Detect overhangs / bridges against the layer below the whole combined group (combined_lower_layer() == lower_layer for regular regions).
+    if (const Layer *lower_layer = this->combined_lower_layer(); lower_layer != nullptr)
         // Cummulative sum of polygons over all the regions.
-        g.lower_slices = &this->layer()->lower_layer->lslices;
+        g.lower_slices = &lower_layer->lslices;
     if (this->layer()->upper_layer != NULL)
         g.upper_slices = &this->layer()->upper_layer->lslices;
 
@@ -131,9 +135,14 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         g.upper_slices_same_region = &this->layer()->upper_layer->get_region(region_id)->slices;
 
     g.layer_id              = (int)this->layer()->id();
-    g.ext_perimeter_flow    = this->flow(frExternalPerimeter);
-    g.overhang_flow         = this->bridging_flow(frPerimeter, object_config.thick_bridges);
-    g.solid_infill_flow     = this->flow(frSolidInfill);
+    g.ext_perimeter_flow    = this->flow(frExternalPerimeter, perimeter_height);
+    g.overhang_flow         = this->bridging_flow(frPerimeter, object_config.thick_bridges, 0, perimeter_height);
+    // Overhangs of external / fully overhanging loops dispatch to the outer wall filament (GCode::process_layer() splits mixed perimeters); resolve their width against its nozzle.
+    g.ext_overhang_flow     = this->bridging_flow(frPerimeter, object_config.thick_bridges,
+                                                  region_config.outer_wall_filament_id.value, perimeter_height);
+    g.solid_infill_flow     = this->flow(frSolidInfill, perimeter_height);
+    // Gap fill dispatches to the outer wall filament (LayerTools::extruder()); resolve its width against its nozzle.
+    g.gap_fill_flow         = this->flow(frSolidInfill, perimeter_height, region_config.outer_wall_filament_id.value);
 
     if (this->layer()->object()->config().wall_generator.value == PerimeterGeneratorType::Arachne && !spiral_mode)
         g.process_arachne();

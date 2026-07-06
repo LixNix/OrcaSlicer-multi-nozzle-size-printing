@@ -227,6 +227,12 @@ enum EnsureVerticalShellThickness {
     evstAll,
 };
 
+// ORCA: per-extruder layer height ("extruder_layer_height").
+enum ExtruderLayerHeightMode {
+    elhmConsistent,
+    elhmAdaptive,
+};
+
 //Orca
 enum InternalBridgeFilter {
     ibfDisabled, ibfLimited, ibfNofilter
@@ -531,6 +537,7 @@ extern std::vector<std::string> save_extruder_ams_count_to_string(const std::vec
     template<> const t_config_enum_values& ConfigOptionEnum<NAME>::get_enum_values();
 
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(PrinterTechnology)
+CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(ExtruderLayerHeightMode)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(GCodeFlavor)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(FuzzySkinType)
 CONFIG_OPTION_ENUM_DECLARE_STATIC_MAPS(FuzzySkinMode)
@@ -945,6 +952,9 @@ PRINT_CONFIG_CLASS_DEFINE(
     // Force the generation of solid shells between adjacent materials/volumes.
     ((ConfigOptionBool,                interface_shells))
     ((ConfigOptionFloat,               layer_height))
+    // ORCA: per-extruder layer height ("extruder_layer_height").
+    ((ConfigOptionEnum<ExtruderLayerHeightMode>, extruder_layer_height_mode))
+    ((ConfigOptionPercent,             extruder_layer_height_tolerance))
     ((ConfigOptionFloat,               mmu_segmented_region_max_width))
     ((ConfigOptionFloat,               mmu_segmented_region_interlocking_depth))
     ((ConfigOptionFloat,               raft_contact_distance))
@@ -968,6 +978,8 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloat,               support_bottom_z_distance))
     ((ConfigOptionInt,                 enforce_support_layers))
     ((ConfigOptionInt,                 support_filament))
+    // ORCA: restrict support/raft/interface printing to filaments of this nozzle diameter (0 = no restriction).
+    ((ConfigOptionFloat,               support_nozzle_diameter))
     ((ConfigOptionFloatOrPercent,      support_line_width))
     ((ConfigOptionBool,                support_interface_not_for_body))
     ((ConfigOptionBool,                support_interface_loop_pattern))
@@ -1561,6 +1573,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloats,             max_layer_height))
     ((ConfigOptionFloats,               fan_min_speed))
     ((ConfigOptionFloats,             min_layer_height))
+    ((ConfigOptionFloats,             extruder_layer_height))
     ((ConfigOptionFloat,              printable_height))
     ((ConfigOptionFloatsNullable,     extruder_printable_height))
     ((ConfigOptionPoint,              best_object_pos))
