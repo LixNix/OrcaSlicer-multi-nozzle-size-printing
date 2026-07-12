@@ -80,6 +80,39 @@ bool check_filament_printable_after_group(const std::vector<unsigned int> &used_
 }
 
 // Return a zero based extruder from the region, or extruder_override if overriden.
+bool perimeter_entity_uses_outer_wall_filament(const ExtrusionEntity &entity)
+{
+    // Chaining may put an overhang path first and fully overhanging loops have no plain
+    // perimeter path: classify by scanning every path (must match the mixed-perimeter split
+    // in GCode::process_layer()).
+    bool has_external = false, has_internal = false;
+    auto classify = [&](const ExtrusionPaths &paths) {
+        for (const ExtrusionPath &path : paths) {
+            if (path.role() == erExternalPerimeter)
+                has_external = true;
+            else if (path.role() == erPerimeter)
+                has_internal = true;
+        }
+    };
+    if (const auto *loop = dynamic_cast<const ExtrusionLoop *>(&entity))
+        classify(loop->paths);
+    else if (const auto *multi_path = dynamic_cast<const ExtrusionMultiPath *>(&entity))
+        classify(multi_path->paths);
+    else {
+        const ExtrusionRole role = entity.role();
+        has_external = role == erExternalPerimeter;
+        has_internal = role == erPerimeter;
+    }
+    return has_external || ! has_internal;
+}
+
+void classify_wall_filaments(const ExtrusionEntityCollection &collection, bool &any_outer, bool &any_inner)
+{
+    any_outer = any_inner = false;
+    for (const ExtrusionEntity *entity : collection.entities)
+        (perimeter_entity_uses_outer_wall_filament(*entity) ? any_outer : any_inner) = true;
+}
+
 unsigned int LayerTools::wall_extruder_id(const PrintRegion &region) const
 {
 	assert(region.config().outer_wall_filament_id.value > 0);
@@ -129,8 +162,11 @@ unsigned int LayerTools::extruder(const ExtrusionEntityCollection &extrusions, c
                 extruder = region.config().sparse_infill_filament_id;
             }
         } else {
-            const ExtrusionRole role = extrusions.role();
-            if (role == erPerimeter)
+            // Classify like the mixed-perimeter split: role() only reflects the first path of
+            // the first loop, which may be an overhang path of an inner loop.
+            bool any_outer = false, any_inner = false;
+            classify_wall_filaments(extrusions, any_outer, any_inner);
+            if (any_inner && ! any_outer)
                 extruder = region.config().inner_wall_filament_id.value;
             else
                 extruder = region.config().outer_wall_filament_id.value;
@@ -159,6 +195,10 @@ static double calc_max_layer_height(const PrintConfig &config, double max_object
 static FilamentChangeStats calc_filament_change_info_by_toolorder(const PrintConfig* config, const std::vector<int>& filament_map, const std::vector<FlushMatrix>& flush_matrix, const std::vector<std::vector<unsigned int>>& layer_sequences)
 {
     FilamentChangeStats ret;
+    // These are advisory statistics; malformed inputs (an unset filament map, a flush matrix
+    // sized for fewer filaments than the tool order uses) must not crash the slicing thread.
+    if (filament_map.empty())
+        return ret;
     std::unordered_map<int, int> flush_volume_per_filament;
     int max_extruder_id = *std::max_element(filament_map.begin(), filament_map.end());
     assert(max_extruder_id >= 0);
@@ -168,10 +208,18 @@ static FilamentChangeStats calc_filament_change_info_by_toolorder(const PrintCon
     float total_filament_flush_weight = 0;
     for (const auto& ls : layer_sequences) {
         for (const auto& item : ls) {
+            if (size_t(item) >= filament_map.size())
+                continue;
             int extruder_id = filament_map[item];
+            if (extruder_id < 0 || size_t(extruder_id) >= last_filament_per_extruder.size())
+                continue;
             int last_filament = last_filament_per_extruder[extruder_id];
             if (last_filament != -1 && last_filament != item) {
-                int flush_volume = flush_matrix[extruder_id][last_filament][item];
+                int flush_volume = 0;
+                if (size_t(extruder_id) < flush_matrix.size() &&
+                    size_t(last_filament) < flush_matrix[extruder_id].size() &&
+                    size_t(item) < flush_matrix[extruder_id][last_filament].size())
+                    flush_volume = flush_matrix[extruder_id][last_filament][item];
                 flush_volume_per_filament[item] += flush_volume;
                 total_filament_change_count += 1;
             }

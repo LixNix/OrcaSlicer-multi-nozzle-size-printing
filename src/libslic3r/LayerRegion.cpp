@@ -34,8 +34,13 @@ Flow LayerRegion::bridging_flow(FlowRole role, bool thick_bridge, unsigned int f
     const PrintRegionConfig &region_config  = region.config();
     const PrintObject       &print_object   = *this->layer()->object();
     Flow bridge_flow;
+    // 2-extruder BBL-style printers reroute filaments through the filament map (matches PrintRegion::flow()).
     // Here this->extruder(role) - 1 may underflow to MAX_INT, but then the get_at() will fall back to zero'th element, so everything is all right.
-    auto nozzle_diameter = float(print_object.print()->config().nozzle_diameter.get_at((filament_id > 0 ? filament_id : region.extruder(role)) - 1));
+    const PrintConfig &bridge_print_config = print_object.print()->config();
+    const unsigned int bridge_filament = filament_id > 0 ? filament_id : region.extruder(role);
+    const size_t bridge_extruder_idx = bridge_filament > 0 && bridge_print_config.nozzle_diameter.size() == 2 && print_object.print()->is_BBL_printer() ?
+        get_extruder_index(bridge_print_config, bridge_filament - 1) : size_t(bridge_filament) - 1;
+    auto nozzle_diameter = float(bridge_print_config.nozzle_diameter.get_at(bridge_extruder_idx));
     const ConfigOptionFloatOrPercent& bridge_width_opt = region_config.bridge_line_width;
     const double                      bridge_width      = bridge_width_opt.get_abs_value(nozzle_diameter);
     const bool                        has_bridge_width  = bridge_width > 0.;
@@ -99,8 +104,11 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         model_rotation_rad = std::atan2((double)m(1, 0), (double)m(0, 0));
     }
 
-    // ORCA: on the top layer of a combined group all perimeters extrude with the whole group's height.
-    const double perimeter_height = this->combined_height();
+    // ORCA: on the top layer of a combined group all perimeters extrude with the whole group's
+    // height. On layers of a walls-only run (wall_combined_count()) the walls are generated with
+    // the run height on every run layer - so the fill boundaries line up with the walls printed
+    // once at the run top - and the wall extrusions of the layers below the top are dropped below.
+    const double perimeter_height = this->wall_combined_height();
 
     PerimeterGenerator g(
         // input:
@@ -123,8 +131,9 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         fill_no_overlap
     );
 
-    // Detect overhangs / bridges against the layer below the whole combined group (combined_lower_layer() == lower_layer for regular regions).
-    if (const Layer *lower_layer = this->combined_lower_layer(); lower_layer != nullptr)
+    // Detect overhangs / bridges against the layer below the whole combined group or wall run
+    // (wall_combined_lower_layer() == lower_layer for regular regions).
+    if (const Layer *lower_layer = this->wall_combined_lower_layer(); lower_layer != nullptr)
         // Cummulative sum of polygons over all the regions.
         g.lower_slices = &lower_layer->lslices;
     if (this->layer()->upper_layer != NULL)
@@ -148,6 +157,14 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         g.process_arachne();
     else
         g.process_classic();
+
+    // ORCA: walls-only pitch. The run layers below the top only generated their perimeters to
+    // carve fill boundaries consistent with the run; the walls themselves (and their thin fills /
+    // gap fills, which print with the walls) extrude once at the run top.
+    if (this->wall_combined_count() == 0) {
+        this->perimeters.clear();
+        this->thin_fills.clear();
+    }
 }
 
 #if 1

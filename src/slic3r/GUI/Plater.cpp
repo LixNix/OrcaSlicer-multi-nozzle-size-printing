@@ -490,6 +490,249 @@ struct ExtruderGroup : StaticGroup
     }
 };
 
+// ORCA multi-nozzle-size: lightweight tab control hosting one page per nozzle in the sidebar.
+// Ported from Snapmaker Orca's per-nozzle sidebar; owner-drawn so it follows the sidebar
+// theme in light and dark mode.
+class CustomNotebook : public wxControl
+{
+public:
+    CustomNotebook(wxWindow* parent, wxWindowID id = wxID_ANY, const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxDefaultSize)
+        : wxControl(parent, id, pos, size, wxBORDER_NONE), m_selectedIndex(-1), m_tabHeight(24), m_tabPadding(10), m_roundRadius(5)
+    {
+        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        UpdateColors();
+
+        Bind(wxEVT_PAINT, &CustomNotebook::OnPaint, this);
+        Bind(wxEVT_ERASE_BACKGROUND, &CustomNotebook::OnEraseBackground, this);
+        Bind(wxEVT_LEFT_DOWN, &CustomNotebook::OnLeftDown, this);
+        Bind(wxEVT_SIZE, &CustomNotebook::OnSize, this);
+    }
+
+    void AddPage(wxWindow* page, const wxString& text)
+    {
+        m_tabs.push_back({text, page});
+        if (page) {
+            page->Reparent(this);
+            page->Hide();
+            page->SetBackgroundColour(m_selectedTabColor);
+        }
+
+        if (m_selectedIndex == -1) {
+            SetSelection(0);
+        }
+
+        UpdateLayout();
+        Refresh();
+    }
+
+    void DeleteAllPages()
+    {
+        for (auto& tab : m_tabs) {
+            if (tab.page) {
+                tab.page->Destroy();
+            }
+        }
+        m_tabs.clear();
+        m_selectedIndex = -1;
+        UpdateLayout();
+        Refresh();
+    }
+
+    size_t GetPageCount() const { return m_tabs.size(); }
+
+    wxWindow* GetPage(size_t index) const { return (index < m_tabs.size()) ? m_tabs[index].page : nullptr; }
+
+    int GetSelection() const { return m_selectedIndex; }
+
+    void SetSelection(size_t index)
+    {
+        if (index >= m_tabs.size() || static_cast<int>(index) == m_selectedIndex)
+            return;
+
+        if (m_selectedIndex != -1 && m_tabs[m_selectedIndex].page) {
+            m_tabs[m_selectedIndex].page->Hide();
+        }
+
+        m_selectedIndex = index;
+
+        if (m_selectedIndex != -1 && m_tabs[m_selectedIndex].page) {
+            m_tabs[m_selectedIndex].page->Show();
+        }
+
+        UpdateLayout();
+        Refresh();
+    }
+
+protected:
+    void OnPaint(wxPaintEvent& event)
+    {
+        UpdateColors();
+
+        wxPaintDC dc(this);
+
+        // background
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.SetBrush(wxBrush(m_bgColor));
+        dc.DrawRectangle(GetClientRect());
+
+        // tab strip background
+        dc.SetPen(wxPen(m_dividerColor, 1));
+        dc.SetBrush(wxBrush(m_dividerColor));
+        wxRect labelRect(0, 0, GetSize().x, m_tabHeight);
+        dc.DrawRoundedRectangle(labelRect, m_roundRadius);
+        dc.DrawRectangle(0, m_tabHeight - 2, GetSize().x, 4);
+
+        // tabs
+        wxFont font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+        font.SetPointSize(m_textSize);
+        dc.SetFont(font);
+
+        auto height = dc.GetCharHeight();
+        if (height > m_tabHeight - 2) {
+            m_tabHeight = height + 2;
+            Layout();
+        }
+
+        int xPos = 0;
+        for (size_t i = 0; i < m_tabs.size(); ++i) {
+            bool isSelected = static_cast<int>(i) == m_selectedIndex;
+
+            int textWidth, textHeight;
+            dc.GetTextExtent(m_tabs[i].text, &textWidth, &textHeight);
+            int tabWidth = textWidth + 2 * m_tabPadding;
+
+            if (isSelected) {
+                dc.SetPen(wxPen(m_dividerColor, 1));
+                dc.SetBrush(wxBrush(m_bgColor));
+                wxRect selectedRect(xPos, 0, tabWidth, m_tabHeight + 2);
+                dc.DrawRectangle(selectedRect);
+                dc.DrawRoundedRectangle(selectedRect, m_roundRadius);
+
+                dc.SetPen(wxPen(m_bgColor, 1));
+                dc.SetBrush(wxBrush(m_bgColor));
+                dc.DrawRectangle(xPos, m_tabHeight, tabWidth, 4);
+            }
+
+            dc.SetTextForeground(isSelected ? m_selectedTextColor : m_textColor);
+            dc.DrawText(m_tabs[i].text, xPos + m_tabPadding, (m_tabHeight - textHeight) / 2);
+
+            xPos += tabWidth;
+        }
+
+        // outer border
+        dc.SetPen(wxPen(m_borderColor, 1));
+        dc.SetBrush(*wxTRANSPARENT_BRUSH);
+        dc.DrawRoundedRectangle(GetClientRect(), m_roundRadius);
+    }
+
+    void OnLeftDown(wxMouseEvent& event)
+    {
+        wxPoint pos = event.GetPosition();
+        if (pos.y > m_tabHeight) {
+            event.Skip();
+            return;
+        }
+
+        int tabIndex = HitTest(pos);
+        if (tabIndex != -1 && tabIndex != m_selectedIndex) {
+            SetSelection(tabIndex);
+            Refresh();
+        }
+    }
+
+    void OnSize(wxSizeEvent& event)
+    {
+        UpdateLayout();
+        Refresh();
+        event.Skip();
+    }
+
+    void OnEraseBackground(wxEraseEvent& event) {}
+
+private:
+    struct TabInfo
+    {
+        wxString  text;
+        wxWindow* page;
+    };
+
+    int HitTest(const wxPoint& pt) const
+    {
+        if (pt.y > m_tabHeight)
+            return -1;
+
+        wxClientDC dc(const_cast<CustomNotebook*>(this));
+        wxFont     font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+        font.SetPointSize(m_textSize);
+        dc.SetFont(font);
+
+        int xPos = 0;
+        for (size_t i = 0; i < m_tabs.size(); ++i) {
+            int textWidth, textHeight;
+            dc.GetTextExtent(m_tabs[i].text, &textWidth, &textHeight);
+            int tabWidth = textWidth + 2 * m_tabPadding;
+
+            if (pt.x >= xPos && pt.x <= xPos + tabWidth) {
+                return i;
+            }
+
+            xPos += tabWidth;
+        }
+
+        return -1;
+    }
+
+    void UpdateColors()
+    {
+        bool is_dark = wxGetApp().app_config->get("dark_color_mode") == "1";
+
+        if (!is_dark) {
+            m_bgColor           = wxColour(255, 255, 255);
+            m_borderColor       = wxColour(240, 240, 240);
+            m_selectedTabColor  = wxColour(255, 255, 255);
+            m_textColor         = wxColour(194, 194, 193);
+            m_dividerColor      = wxColour(240, 240, 240);
+            m_selectedTextColor = wxColour(0, 0, 0);
+        } else {
+            m_bgColor           = wxColour(45, 45, 49);
+            m_borderColor       = wxColour(76, 76, 85);
+            m_selectedTabColor  = wxColour(45, 45, 49);
+            m_textColor         = wxColour(104, 105, 107);
+            m_dividerColor      = wxColour(51, 51, 55);
+            m_selectedTextColor = wxColour(255, 255, 255);
+        }
+    }
+
+    void UpdateLayout()
+    {
+        if (m_selectedIndex != -1 && m_tabs[m_selectedIndex].page) {
+            wxSize size = GetSize();
+            m_tabs[m_selectedIndex].page->SetSize(2, m_tabHeight + 1, size.x - 4, size.y - m_tabHeight - 4);
+            m_tabs[m_selectedIndex].page->Layout();
+        }
+    }
+
+private:
+    std::vector<TabInfo> m_tabs;
+    int                  m_selectedIndex;
+
+    wxColour m_bgColor;
+    wxColour m_borderColor;
+    wxColour m_selectedTabColor;
+    wxColour m_textColor;
+    wxColour m_selectedTextColor;
+    wxColour m_dividerColor;
+
+    int m_tabHeight;
+    int m_tabPadding;
+    int m_roundRadius;
+#ifdef _WIN32
+    int m_textSize = 10;
+#else
+    int m_textSize = 13;
+#endif
+};
+
 struct Sidebar::priv
 {
     Plater *plater;
@@ -514,6 +757,14 @@ struct Sidebar::priv
     Label *         label_nozzle_title= nullptr;
     ComboBox *      combo_nozzle_dia  = nullptr;
     Label *         label_nozzle_type = nullptr;
+
+    // ORCA multi-nozzle-size: per-nozzle tabs (Diameter + Preferred layer height), shown for
+    // multi-extruder printers instead of the single variant-switching Nozzle box above.
+    StaticBox *                  m_nozzle_container{nullptr};
+    CustomNotebook *             m_nozzle_notebook{nullptr};
+    std::vector<ComboBox *>      m_nozzle_diameter_lists;
+    std::vector<ComboBox *>      m_nozzle_layer_height_lists;
+    bool                         m_nozzle_rebuild_scheduled{false};
 
     // Printer - bed
     StaticBox *     panel_printer_bed = nullptr;
@@ -656,6 +907,20 @@ void Sidebar::priv::layout_printer(bool isBBL, bool isDual)
 
         vsizer_printer->Add(extruder_sizer, 1, wxEXPAND | wxTOP, FromDIP(2));
 
+        // ORCA multi-nozzle-size: per-nozzle tabs with a Diameter and a Preferred layer height
+        // combo per nozzle. They edit nozzle_diameter[i] / extruder_layer_height[i] of the
+        // current printer preset instead of switching to a different variant preset, which is
+        // what mixed-nozzle printing needs.
+        m_nozzle_container = new StaticBox(m_panel_printer_content);
+        m_nozzle_container->SetCornerRadius(FromDIP(PRINTER_PANEL_RADIUS));
+        m_nozzle_notebook  = new CustomNotebook(m_nozzle_container, wxID_ANY);
+        wxBoxSizer *nozzle_sizer = new wxBoxSizer(wxVERTICAL);
+        nozzle_sizer->Add(m_nozzle_notebook, 1, wxEXPAND | wxALL, FromDIP(0));
+        m_nozzle_container->SetSizer(nozzle_sizer);
+        // Tall enough for the tab strip plus the Diameter and Preferred layer height rows.
+        m_nozzle_container->SetMinSize(wxSize(-1, FromDIP(112)));
+        vsizer_printer->Add(m_nozzle_container, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, FromDIP(SidebarProps::ContentMargin()));
+
         vsizer_printer->AddSpacer(FromDIP(SidebarProps::ContentMarginV()));
     }
 
@@ -675,15 +940,23 @@ void Sidebar::priv::layout_printer(bool isBBL, bool isDual)
 
     // NEEDFIX requires AMS check or any type of ???
     // Single nozzle & non ams
+    // ORCA multi-nozzle-size: printers with more than one toolhead get the per-nozzle tabs
+    // instead of the single Nozzle box; that box switches the whole printer preset to another
+    // variant, which would force all nozzles to the same size. Single-nozzle printers keep it,
+    // since selecting the matching variant preset is right for them.
+    const auto *nozzle_diameter_opt = cfg.option<ConfigOptionFloats>("nozzle_diameter");
+    const bool  is_multi_nozzle     = nozzle_diameter_opt != nullptr && nozzle_diameter_opt->values.size() > 1;
     if (!isDual) {
         // Orca: for printer without flow variant, we do not show flow combo
         int extruder_count = 0;
         const bool has_flow_variant = cfg.support_different_extruders(extruder_count);
 
-        panel_nozzle_dia->Show(!has_flow_variant);
+        panel_nozzle_dia->Show(!has_flow_variant && !is_multi_nozzle);
+        m_nozzle_container->Show(!has_flow_variant && is_multi_nozzle);
         extruder_single_sizer->Show(has_flow_variant);
     } else {
         panel_nozzle_dia->Show(false);
+        m_nozzle_container->Show(false);
         extruder_single_sizer->Show(false);
     }
 
@@ -2097,6 +2370,9 @@ Sidebar::Sidebar(Plater *parent)
 
         p->vsizer_printer = new wxBoxSizer(wxVERTICAL);
         p->layout_printer(true, true);
+        // ORCA multi-nozzle-size: populate the per-nozzle tabs; rebuilt on printer preset
+        // changes from update_presets().
+        update_nozzle_settings();
         p->m_panel_printer_content->SetSizer(p->vsizer_printer);
         p->m_panel_printer_content->Layout();
         scrolled_sizer->Add(p->m_panel_printer_content, 0, wxEXPAND, 0);
@@ -2805,6 +3081,20 @@ void Sidebar::update_presets(Preset::Type preset_type)
         if (GUI::wxGetApp().plater())
             GUI::wxGetApp().plater()->update_machine_sync_status();
 
+        // ORCA multi-nozzle-size: the per-nozzle tabs follow the printer preset (nozzle count,
+        // available variants, per-nozzle values). layout_printer() above decided whether they
+        // are shown. The rebuild must be deferred: update_presets() re-enters synchronously
+        // from Tab::load_config (update_dirty -> on_presets_changed) when the tabs' own combo
+        // handlers change the printer config, and rebuilding here would destroy the combo that
+        // is still dispatching its selection event.
+        if (!p->m_nozzle_rebuild_scheduled) {
+            p->m_nozzle_rebuild_scheduled = true;
+            wxGetApp().CallAfter([this]() {
+                p->m_nozzle_rebuild_scheduled = false;
+                update_nozzle_settings();
+            });
+        }
+
         Layout();
 
         break;
@@ -2817,6 +3107,370 @@ void Sidebar::update_presets(Preset::Type preset_type)
     wxGetApp().preset_bundle->export_selections(*wxGetApp().app_config);
 
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(": exit.");
+}
+
+// ORCA multi-nozzle-size: label of a nozzle diameter / layer height combo item. Formatted with
+// the C locale (period decimal) to match the other "x.xmm" items and the ToCDouble parsing of
+// the selection handlers. Not get_diameter_string(): layer heights need more than 2 decimals
+// (e.g. 0.375) to stay an exact multiple of the object layer height.
+static wxString nozzle_combo_label(double value)
+{
+    std::ostringstream oss;
+    oss.imbue(std::locale::classic());
+    oss << value;
+    return wxString(oss.str()) + "mm";
+}
+
+// Show THIS nozzle's own diameter (per-nozzle sizes are supported), selecting the matching
+// "x.xmm" item so the read-only combo accepts it. Falls back to the uniform printer_variant
+// label only when the per-nozzle value is unavailable.
+static void select_nozzle_diameter_label(ComboBox *diameter_combo, double this_nd)
+{
+    wxString this_label;
+    for (unsigned int n = 0; n < diameter_combo->GetCount(); ++n) {
+        wxString item = diameter_combo->GetString(n);
+        wxString num  = item;
+        if (num.EndsWith("mm"))
+            num.RemoveLast(2);
+        double item_nd = 0.;
+        if (num.ToCDouble(&item_nd) && std::abs(item_nd - this_nd) < EPSILON) {
+            this_label = item;
+            break;
+        }
+    }
+    if (this_label.empty() && this_nd > 0.) {
+        // A per-nozzle diameter not among the printer's variant list (e.g. an imported config):
+        // add it so the combo can display the true value.
+        this_label = nozzle_combo_label(this_nd);
+        diameter_combo->AppendString(this_label);
+    }
+    if (this_label.empty()) {
+        const auto *pv = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionString>("printer_variant");
+        this_label = (pv ? wxString(pv->value) : wxString()) + "mm";
+    }
+    diameter_combo->SetValue(this_label);
+}
+
+// ORCA multi-nozzle-size: (re)fill one sidebar "Preferred layer height" combo with the target
+// heights extruder `extruder_idx` may use: "Default" (= 0, follow the object layer height) plus
+// every integer multiple of the object layer height that fits through the nozzle bore and lies
+// within the extruder's layer height limits.
+static void fill_nozzle_layer_height_combo(ComboBox *combo, size_t extruder_idx)
+{
+    const DynamicPrintConfig &printer_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+    const DynamicPrintConfig &print_config   = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+
+    const auto  *nozzle_diameter = printer_config.option<ConfigOptionFloats>("nozzle_diameter");
+    const auto  *preferred       = printer_config.option<ConfigOptionFloats>("extruder_layer_height");
+    const auto  *min_lh          = printer_config.option<ConfigOptionFloats>("min_layer_height");
+    const auto  *max_lh          = printer_config.option<ConfigOptionFloats>("max_layer_height");
+    const auto  *base_opt        = print_config.option<ConfigOptionFloat>("layer_height");
+    const double base_height     = base_opt != nullptr ? base_opt->value : 0.;
+
+    combo->Clear();
+    combo->AppendString(_L("Default"));
+
+    const double bore = (nozzle_diameter != nullptr && extruder_idx < nozzle_diameter->values.size()) ?
+        nozzle_diameter->values[extruder_idx] : 0.;
+    double cap = bore;
+    if (max_lh != nullptr && !max_lh->values.empty() && max_lh->get_at(extruder_idx) > EPSILON)
+        cap = std::min(cap, max_lh->get_at(extruder_idx));
+    const double floor_lh = (min_lh != nullptr && !min_lh->values.empty()) ? min_lh->get_at(extruder_idx) : 0.;
+    const double current  = (preferred != nullptr && !preferred->values.empty()) ?
+        std::max(0., preferred->get_at(extruder_idx)) : 0.;
+
+    wxString current_label;
+    if (base_height > EPSILON)
+        for (int n = 1; n * base_height <= cap + EPSILON; ++n) {
+            const double height = n * base_height;
+            if (height + EPSILON < floor_lh)
+                continue;
+            const wxString label = nozzle_combo_label(height);
+            combo->AppendString(label);
+            if (current > 0. && std::abs(height - current) < EPSILON)
+                current_label = label;
+        }
+    if (current_label.empty() && current > 0.) {
+        // An explicit preference no longer among the valid values (the object layer height or
+        // the limits changed after it was set) is still displayed truthfully; slicing warns.
+        current_label = nozzle_combo_label(current);
+        combo->AppendString(current_label);
+    }
+    combo->SetValue(current_label.empty() ? _L("Default") : current_label);
+}
+
+// ORCA multi-nozzle-size: rebuild the per-nozzle tabs (one page per extruder, with a Diameter
+// and a Preferred layer height combo) from the edited printer and process presets. Ported from
+// Snapmaker Orca's sidebar.
+void Sidebar::update_nozzle_settings()
+{
+    if (!p->m_nozzle_notebook)
+        return;
+
+    auto* nozzle_diameter = dynamic_cast<const ConfigOptionFloats*>(
+        wxGetApp().preset_bundle->printers.get_edited_preset().config.option("nozzle_diameter"));
+    size_t new_nozzle_count = nozzle_diameter ? nozzle_diameter->values.size() : 1;
+
+    // Clear existing pages and controls, keeping the selected tab across the rebuild.
+    const int prev_page = p->m_nozzle_notebook->GetSelection();
+    p->m_nozzle_notebook->DeleteAllPages();
+    p->m_nozzle_diameter_lists.clear();
+    p->m_nozzle_layer_height_lists.clear();
+
+    for (size_t i = 0; i < new_nozzle_count; i++) {
+        wxPanel* nozzle_panel = new wxPanel(p->m_nozzle_notebook, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                            wxTAB_TRAVERSAL | wxBORDER_NONE);
+
+        wxBoxSizer* tab_sizer = new wxBoxSizer(wxVERTICAL);
+
+        // Diameter row
+        wxBoxSizer*   diameter_sizer = new wxBoxSizer(wxHORIZONTAL);
+        wxStaticText* diameter_label = new wxStaticText(nozzle_panel, wxID_ANY, _L("Diameter"));
+        bool          is_dark        = wxGetApp().app_config->get("dark_color_mode") == "1";
+        diameter_label->SetForegroundColour(is_dark ? wxColor(194, 194, 194) : wxColor(0, 0, 0));
+        diameter_label->SetFont(Label::Body_14);
+
+        ComboBox* diameter_combo = new ComboBox(nozzle_panel, wxID_ANY, wxEmptyString, wxDefaultPosition, {-1, FromDIP(32)}, 0,
+                                                nullptr, wxCB_READONLY);
+
+        // All variants shipped for this printer_model. Mixed variants like "0.4+0.6" describe
+        // whole-printer configurations, not a single nozzle size; only plain numbers are
+        // per-nozzle choices.
+        auto diameters = wxGetApp().preset_bundle->printers.diameters_of_selected_printer();
+        for (auto& diameter : diameters) {
+            double d = 0.;
+            if (wxString(diameter).ToCDouble(&d) && d > 0.)
+                diameter_combo->AppendString(wxString(diameter) + "mm");
+        }
+        if (diameter_combo->GetCount() == 0) {
+            const auto *pv = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionString>("printer_variant");
+            if (pv)
+                diameter_combo->AppendString(wxString(pv->value) + "mm");
+        }
+        if (diameter_combo->GetCount() < 2) {
+            diameter_combo->Enable(false);
+        }
+
+        diameter_combo->Bind(wxEVT_COMBOBOX, [this, diameter_combo, i](wxCommandEvent& event) {
+            // ORCA multi-nozzle-size: set ONLY this nozzle's diameter, mirroring the
+            // Printer Settings -> Extruder tab. Switching the whole printer preset to a
+            // single-diameter variant (like the single Nozzle box does) would force all
+            // nozzles to the same size and defeat per-nozzle sizes.
+
+            // Parse the selected diameter from the "0.4mm" combo item.
+            wxString sel_num = diameter_combo->GetValue();
+            if (sel_num.EndsWith("mm"))
+                sel_num.RemoveLast(2);
+            double new_nd = 0.;
+            if (!sel_num.ToCDouble(&new_nd) || new_nd <= 0.)
+                return;
+
+            Tab* printer_tab = wxGetApp().get_tab(Preset::TYPE_PRINTER);
+            if (printer_tab == nullptr)
+                return;
+
+            // Write nozzle_diameter[i] into the edited printer config, like Tab.cpp's extruder page.
+            DynamicPrintConfig  new_conf         = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+            const auto*         nozzle_diam_opt  = static_cast<const ConfigOptionFloats*>(new_conf.option("nozzle_diameter"));
+            if (nozzle_diam_opt == nullptr || i >= nozzle_diam_opt->values.size())
+                return;
+            std::vector<double> nozzle_diameters = nozzle_diam_opt->values;
+            if (std::abs(nozzle_diameters[i] - new_nd) < EPSILON)
+                return; // unchanged
+            nozzle_diameters[i] = new_nd;
+            new_conf.set_key_value("nozzle_diameter", new ConfigOptionFloats(nozzle_diameters));
+
+            // ORCA multi-nozzle-size: a different nozzle size usually means different layer
+            // height limits. Adopt them from the printer's profile for the new nozzle size when
+            // one exists, otherwise ask the user to review the limits manually.
+            std::string notice;
+            bool        variant_found = false;
+            {
+                const PrinterPresetCollection &printers = wxGetApp().preset_bundle->printers;
+                const std::string model   = new_conf.opt_string("printer_model");
+                const std::string variant = sel_num.ToStdString();
+                const Preset *variant_preset = printers.find_system_preset_by_model_and_variant(model, variant);
+                if (variant_preset == nullptr)
+                    variant_preset = printers.find_custom_preset_by_model_and_variant(model, variant);
+                const auto *v_min = variant_preset == nullptr ? nullptr : variant_preset->config.option<ConfigOptionFloats>("min_layer_height");
+                const auto *v_max = variant_preset == nullptr ? nullptr : variant_preset->config.option<ConfigOptionFloats>("max_layer_height");
+                const auto *e_min = static_cast<const ConfigOptionFloats*>(new_conf.option("min_layer_height"));
+                const auto *e_max = static_cast<const ConfigOptionFloats*>(new_conf.option("max_layer_height"));
+                if (v_min != nullptr && !v_min->values.empty() && v_max != nullptr && !v_max->values.empty() &&
+                    e_min != nullptr && e_max != nullptr) {
+                    variant_found = true;
+                    std::vector<double> mins = e_min->values, maxs = e_max->values;
+                    mins.resize(nozzle_diameters.size(), mins.empty() ? 0. : mins.back());
+                    maxs.resize(nozzle_diameters.size(), maxs.empty() ? 0. : maxs.back());
+                    mins[i] = v_min->get_at(i);
+                    maxs[i] = v_max->get_at(i);
+                    new_conf.set_key_value("min_layer_height", new ConfigOptionFloats(mins));
+                    new_conf.set_key_value("max_layer_height", new ConfigOptionFloats(maxs));
+                    notice = GUI::format(_u8L("Nozzle %1%: layer height limits set to %2%-%3% mm, from \"%4%\"."),
+                                         i + 1, mins[i], maxs[i], variant_preset->name);
+                } else {
+                    notice = GUI::format(_u8L("This printer has no profile for a %1% mm nozzle. Please review the "
+                                              "layer height limits of nozzle %2% in the printer settings."),
+                                         variant, i + 1);
+                }
+            }
+            // A preferred layer height that no longer fits through the new nozzle cannot print;
+            // reset it to Default rather than leave a dead setting behind.
+            if (const auto *height_opt = static_cast<const ConfigOptionFloats*>(new_conf.option("extruder_layer_height"));
+                height_opt != nullptr && !height_opt->values.empty() && height_opt->get_at(i) > new_nd + EPSILON) {
+                std::vector<double> heights = height_opt->values;
+                heights.resize(nozzle_diameters.size(), 0.);
+                heights[i] = 0.;
+                new_conf.set_key_value("extruder_layer_height", new ConfigOptionFloats(heights));
+                notice += "\n";
+                notice += GUI::format(_u8L("The preferred layer height of nozzle %1% no longer fits through it and was reset to Default."), i + 1);
+            }
+
+            // load_config marks the printer preset modified and propagates the change without
+            // rebuilding these combos or switching presets, so the other nozzles keep their sizes.
+            printer_tab->load_config(new_conf);
+
+            wxGetApp().plater()->get_notification_manager()->push_notification(
+                NotificationType::CustomNotification,
+                variant_found ? NotificationManager::NotificationLevel::RegularNotificationLevel :
+                                NotificationManager::NotificationLevel::WarningNotificationLevel,
+                notice);
+            // The valid preferred layer heights of this nozzle follow its bore and limits.
+            if (i < p->m_nozzle_layer_height_lists.size() && p->m_nozzle_layer_height_lists[i] != nullptr)
+                fill_nozzle_layer_height_combo(p->m_nozzle_layer_height_lists[i], i);
+            // Do not event.Skip(): the sidebar-level wxEVT_COMBOBOX handler
+            // (Plater::priv::on_combobox_select) would treat it as the bed-type combo.
+        });
+
+        const double this_nd = (nozzle_diameter && i < nozzle_diameter->values.size()) ? nozzle_diameter->values[i] : 0.;
+        select_nozzle_diameter_label(diameter_combo, this_nd);
+
+        p->m_nozzle_diameter_lists.push_back(diameter_combo);
+
+        diameter_sizer->AddSpacer(15);
+        diameter_sizer->Add(diameter_label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(5));
+        diameter_sizer->AddSpacer(10);
+        diameter_sizer->Add(diameter_combo, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(15));
+
+        // Preferred layer height row: which multiple of the object layer height this extruder
+        // should print with (the "extruder_layer_height" printer option).
+        wxBoxSizer*   lh_sizer = new wxBoxSizer(wxHORIZONTAL);
+        wxStaticText* lh_label = new wxStaticText(nozzle_panel, wxID_ANY, _L("Preferred layer height"));
+        lh_label->SetForegroundColour(is_dark ? wxColor(194, 194, 194) : wxColor(0, 0, 0));
+        lh_label->SetFont(Label::Body_14);
+
+        ComboBox* lh_combo = new ComboBox(nozzle_panel, wxID_ANY, wxEmptyString, wxDefaultPosition, {-1, FromDIP(32)}, 0,
+                                          nullptr, wxCB_READONLY);
+        lh_combo->SetToolTip(_L("Layer height this extruder should print with: an integer multiple of the object "
+                                "layer height within this extruder's layer height limits. Default keeps the object "
+                                "layer height."));
+        fill_nozzle_layer_height_combo(lh_combo, i);
+
+        lh_combo->Bind(wxEVT_COMBOBOX, [lh_combo, i](wxCommandEvent& event) {
+            // "Default" (or anything non-numeric) clears the preference: 0 = object layer height.
+            wxString sel = lh_combo->GetValue();
+            if (sel.EndsWith("mm"))
+                sel.RemoveLast(2);
+            double new_height = 0.;
+            if (!sel.ToCDouble(&new_height) || new_height < 0.)
+                new_height = 0.;
+
+            Tab* printer_tab = wxGetApp().get_tab(Preset::TYPE_PRINTER);
+            if (printer_tab == nullptr)
+                return;
+            DynamicPrintConfig new_conf   = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+            const auto*        height_opt = static_cast<const ConfigOptionFloats*>(new_conf.option("extruder_layer_height"));
+            const auto*        nd_opt     = static_cast<const ConfigOptionFloats*>(new_conf.option("nozzle_diameter"));
+            if (height_opt == nullptr || nd_opt == nullptr)
+                return;
+            std::vector<double> heights = height_opt->values;
+            heights.resize(nd_opt->values.size(), 0.);
+            if (i >= heights.size() || std::abs(heights[i] - new_height) < EPSILON)
+                return;
+            heights[i] = new_height;
+            new_conf.set_key_value("extruder_layer_height", new ConfigOptionFloats(heights));
+            // As with the diameter combo: marks the printer preset modified and propagates the
+            // change without switching presets. Do not event.Skip() (see above).
+            printer_tab->load_config(new_conf);
+        });
+        p->m_nozzle_layer_height_lists.push_back(lh_combo);
+
+        lh_sizer->AddSpacer(15);
+        lh_sizer->Add(lh_label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(5));
+        lh_sizer->AddSpacer(10);
+        lh_sizer->Add(lh_combo, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(15));
+
+        tab_sizer->Add(diameter_sizer, 0, wxEXPAND | wxTOP, FromDIP(6));
+        tab_sizer->Add(lh_sizer, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(6));
+
+        nozzle_panel->SetSizer(tab_sizer);
+
+        wxString tab_name;
+        switch (new_nozzle_count)
+        {
+        case 1:
+        {
+            tab_name = _L("Nozzle");
+            break;
+        }
+        case 2:
+        {
+            if (i == 0)
+                tab_name = _L("Left Nozzle");
+            else
+                tab_name = _L("Right Nozzle");
+
+            break;
+        }
+        default:
+        {
+            tab_name = wxString(_L("Nozzle")) + wxString::Format(" %d", int(i + 1));
+        }
+
+        }
+        p->m_nozzle_notebook->AddPage(nozzle_panel, tab_name);
+    }
+
+    if (prev_page > 0 && prev_page < (int) p->m_nozzle_notebook->GetPageCount())
+        p->m_nozzle_notebook->SetSelection(size_t(prev_page));
+
+    p->m_nozzle_notebook->Layout();
+}
+
+// ORCA multi-nozzle-size: refresh the values shown by the nozzle tabs in place, without
+// rebuilding them (no tab-selection changes). Called whenever the printer's nozzle sizes,
+// layer height limits or preferred layer heights change, or the object layer height changes
+// (it defines which preferred layer heights are valid). A change of the extruder count
+// escalates to a deferred full rebuild of the tabs.
+void Sidebar::update_nozzle_values()
+{
+    if (p->m_nozzle_notebook == nullptr)
+        return;
+
+    const auto *nozzle_diameter = dynamic_cast<const ConfigOptionFloats*>(
+        wxGetApp().preset_bundle->printers.get_edited_preset().config.option("nozzle_diameter"));
+    const size_t nozzle_count = nozzle_diameter != nullptr ? nozzle_diameter->values.size() : 1;
+    if (nozzle_count != p->m_nozzle_notebook->GetPageCount()) {
+        // Defer the rebuild: this can be reached from an event handler of a control that lives
+        // on one of the pages about to be destroyed. Tab visibility needs no refresh here:
+        // every flow that changes the extruder count also runs update_presets(TYPE_PRINTER),
+        // whose layout_printer() call recomputes it synchronously.
+        if (!p->m_nozzle_rebuild_scheduled) {
+            p->m_nozzle_rebuild_scheduled = true;
+            wxGetApp().CallAfter([this]() {
+                p->m_nozzle_rebuild_scheduled = false;
+                update_nozzle_settings();
+            });
+        }
+        return;
+    }
+    if (nozzle_diameter != nullptr)
+        for (size_t i = 0; i < p->m_nozzle_diameter_lists.size() && i < nozzle_diameter->values.size(); ++i)
+            if (p->m_nozzle_diameter_lists[i] != nullptr)
+                select_nozzle_diameter_label(p->m_nozzle_diameter_lists[i], nozzle_diameter->values[i]);
+    for (size_t i = 0; i < p->m_nozzle_layer_height_lists.size(); ++i)
+        if (p->m_nozzle_layer_height_lists[i] != nullptr)
+            fill_nozzle_layer_height_combo(p->m_nozzle_layer_height_lists[i], i);
 }
 
 //BBS
@@ -5021,8 +5675,9 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         "prime_tower_infill_gap", "prime_volume",
         "extruder_colour", "filament_colour", "filament_type", "material_colour", "printable_height", "extruder_printable_height", "printer_model", "printer_technology",
         // These values are necessary to construct SlicingParameters by the Canvas3D variable layer height editor.
-        "layer_height", "initial_layer_print_height", "min_layer_height", "max_layer_height",
-        "wall_loops", "outer_wall_filament_id", "inner_wall_filament_id", "sparse_infill_density", "sparse_infill_filament_id", "top_shell_layers",
+        "layer_height", "initial_layer_print_height", "min_layer_height", "max_layer_height", "extruder_layer_height",
+        "wall_loops", "outer_wall_filament_id", "inner_wall_filament_id", "sparse_infill_density", "sparse_infill_filament_id",
+        "internal_solid_filament_id", "top_surface_filament_id", "bottom_surface_filament_id", "top_shell_layers",
         "enable_support", "support_filament", "support_interface_filament",
         "support_top_z_distance", "support_bottom_z_distance", "raft_layers",
         "wipe_tower_rotation_angle", "wipe_tower_cone_angle", "wipe_tower_extra_spacing", "wipe_tower_extra_flow", "wipe_tower_max_purge_speed",
@@ -16646,8 +17301,12 @@ void Plater::on_filaments_delete(size_t num_filaments, size_t filament_id, int r
     // update UI
     sidebar().on_filaments_delete(filament_id);
 
-    // update global support filament
-    static const char *keys[] = {"support_filament", "support_interface_filament"};
+    // update global support and per-feature filament selections
+    static const char *keys[] = {"support_filament", "support_interface_filament",
+                                 "outer_wall_filament_id", "inner_wall_filament_id", "sparse_infill_filament_id",
+                                 "internal_solid_filament_id", "top_surface_filament_id", "bottom_surface_filament_id",
+                                 // 0 = "auto" for the wipe tower, the same deleted -> 0 / shift-down rule applies.
+                                 "wipe_tower_filament"};
     for (auto key : keys)
         if (p->config->has(key)) {
             if(p->config->opt_int(key) == filament_id + 1)
@@ -16657,6 +17316,29 @@ void Plater::on_filaments_delete(size_t num_filaments, size_t filament_id, int r
                 (*(p->config)).set_key_value(key, new ConfigOptionInt(new_value));
             }
         }
+    // The slicer reads these selections from the edited print preset (preset_bundle->full_config()),
+    // not from the plater's cached config above - remap it too, or a deleted filament's id silently
+    // shifts onto the wrong physical filament.
+    {
+        DynamicPrintConfig &print_config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+        bool print_config_changed = false;
+        for (auto key : keys)
+            if (print_config.has(key)) {
+                const int value = print_config.opt_int(key);
+                if (value == int(filament_id) + 1) {
+                    // Back to "Default" (0): use the part's filament.
+                    print_config.set_key_value(key, new ConfigOptionInt(0));
+                    print_config_changed = true;
+                } else if (value > int(filament_id) + 1) {
+                    print_config.set_key_value(key, new ConfigOptionInt(value - 1));
+                    print_config_changed = true;
+                }
+            }
+        if (print_config_changed) {
+            wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
+            wxGetApp().get_tab(Preset::TYPE_PRINT)->reload_config();
+        }
+    }
 
     // update object/volume/support(object and volume) filament id
     sidebar().obj_list()->update_objects_list_filament_column_when_delete_filament(filament_id, num_filaments, replace_filament_id);
@@ -16736,6 +17418,7 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
 {
     bool update_scheduled = false;
     bool bed_shape_changed = false;
+    bool nozzle_tabs_changed = false;
     //bool print_sequence_changed = false;
     t_config_option_keys diff_keys = p->config->diff(config);
 
@@ -16826,7 +17509,18 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
                  opt_key == "top_surface_filament_id" || opt_key == "bottom_surface_filament_id") {
             update_scheduled = true;
         }
+        // ORCA multi-nozzle-size: the sidebar nozzle tabs mirror the printer's extruder count,
+        // nozzle sizes, layer height limits and preferred layer heights, and the valid preferred
+        // heights follow the object layer height. update_nozzle_values() refreshes them in place
+        // (and defers a full tab rebuild when the extruder count changed).
+        else if (opt_key == "nozzle_diameter" || opt_key == "extruder_layer_height" ||
+                 opt_key == "layer_height" || opt_key == "min_layer_height" || opt_key == "max_layer_height") {
+            nozzle_tabs_changed = true;
+        }
     }
+
+    if (nozzle_tabs_changed && p->sidebar != nullptr)
+        p->sidebar->update_nozzle_values();
 
     if (bed_shape_changed)
         set_bed_shape();

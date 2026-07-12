@@ -1805,7 +1805,7 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
             // ORCA: the top layer of a combined group prints the whole group at once, so tolerate a gap of combined_height() (equals the layer height when not combined).
             if (layer_to_print.object_layer != nullptr)
                 for (const LayerRegion *layerm : layer_to_print.object_layer->regions())
-                    layer_span = std::max(layer_span, layerm->combined_height());
+                    layer_span = std::max(layer_span, layerm->wall_combined_height());
             double maximal_print_z = (last_extrusion_layer ? last_extrusion_layer->print_z() : 0.)
                 + layer_span
                 + std::max(0., extra_gap);
@@ -5131,50 +5131,36 @@ LayerResult GCode::process_layer(
                             }
                         };
 
-                        bool split_mixed_perimeters =
-                            entity_type == ObjectByExtruder::Island::Region::PERIMETERS &&
-                            region.config().outer_wall_filament_id.value != region.config().inner_wall_filament_id.value &&
-                            extrusions->role() == erMixed;
+                        // ORCA: gate the split on the actual per-path classification: the collection
+                        // role() is erMixed only when the loops' FIRST paths differ, missing e.g. a
+                        // collection whose loops all start with an overhang path.
+                        bool any_outer_wall = false, any_inner_wall = false;
+                        if (entity_type == ObjectByExtruder::Island::Region::PERIMETERS &&
+                            region.config().outer_wall_filament_id.value != region.config().inner_wall_filament_id.value)
+                            classify_wall_filaments(*extrusions, any_outer_wall, any_inner_wall);
+                        const bool split_mixed_perimeters = any_outer_wall && any_inner_wall;
 
                         if (split_mixed_perimeters) {
                             auto outer_perimeters = std::make_unique<ExtrusionEntityCollection>();
                             auto inner_perimeters = std::make_unique<ExtrusionEntityCollection>();
                             for (const ExtrusionEntity *entity : extrusions->entities) {
-                                // ORCA: chaining may put an overhang path first and fully overhanging loops
-                                // have no plain perimeter path: classify by scanning every path; anything without
-                                // an inner perimeter path uses the outer wall filament (matches PerimeterGenerator's
-                                // overhang flows).
-                                bool has_external = false, has_internal = false;
-                                auto classify = [&](const ExtrusionPaths &paths) {
-                                    for (const ExtrusionPath &path : paths) {
-                                        if (path.role() == erExternalPerimeter)
-                                            has_external = true;
-                                        else if (path.role() == erPerimeter)
-                                            has_internal = true;
-                                    }
-                                };
-                                if (const auto *loop = dynamic_cast<const ExtrusionLoop*>(entity))
-                                    classify(loop->paths);
-                                else if (const auto *multi_path = dynamic_cast<const ExtrusionMultiPath*>(entity))
-                                    classify(multi_path->paths);
-                                else {
-                                    const ExtrusionRole role = entity->role();
-                                    has_external = role == erExternalPerimeter;
-                                    has_internal = role == erPerimeter;
-                                }
-                                if (has_external || !has_internal)
+                                // Same classification as the wall filament dispatch (LayerTools::extruder()).
+                                if (perimeter_entity_uses_outer_wall_filament(*entity))
                                     outer_perimeters->append(*entity);
                                 else
                                     inner_perimeters->append(*entity);
                             }
 
+                            // Wiping-extrusion overrides were marked (and their purge volume
+                            // credited) against the ORIGINAL collection - look them up under that
+                            // key so a purge planned into these perimeters still happens.
                             if (!outer_perimeters->entities.empty()) {
                                 split_perimeter_storage.emplace_back(std::move(outer_perimeters));
-                                process_extrusions(split_perimeter_storage.back().get(), nullptr, false);
+                                process_extrusions(split_perimeter_storage.back().get(), extrusions, true);
                             }
                             if (!inner_perimeters->entities.empty()) {
                                 split_perimeter_storage.emplace_back(std::move(inner_perimeters));
-                                process_extrusions(split_perimeter_storage.back().get(), nullptr, false);
+                                process_extrusions(split_perimeter_storage.back().get(), extrusions, true);
                             }
                         } else {
                             process_extrusions(extrusions, extrusions, true);

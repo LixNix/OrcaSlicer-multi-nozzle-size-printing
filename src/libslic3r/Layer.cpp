@@ -49,6 +49,23 @@ const Layer* LayerRegion::combined_lower_layer() const
     return layer;
 }
 
+// ORCA: walls-only pitch, see PrintObject::wall_layer_height_multiplier().
+double LayerRegion::wall_combined_height() const
+{
+    return m_wall_combined_height > 0. ? m_wall_combined_height : this->combined_height();
+}
+
+const Layer* LayerRegion::wall_combined_lower_layer() const
+{
+    if (m_wall_combined_count <= 1)
+        // count == 0 (walls extrude at the run top above) produces no wall extrusions anyway.
+        return this->combined_lower_layer();
+    const Layer *layer = m_layer;
+    for (unsigned short i = 0; layer != nullptr && i < m_wall_combined_count; ++ i)
+        layer = layer->lower_layer;
+    return layer;
+}
+
 // merge all regions' slices to get islands
 void Layer::make_slices()
 {
@@ -226,6 +243,8 @@ void Layer::make_perimeters()
 		            const PrintRegion &other_region = other_layerm->region();
                     // Regions combined to different extruder layer heights extrude with different heights and must not share a make_perimeters() call.
                     if ((*layerm)->combined_layer_count() == other_layerm->combined_layer_count() &&
+                        (*layerm)->wall_combined_count() == other_layerm->wall_combined_count() &&
+                        std::abs((*layerm)->wall_combined_height() - other_layerm->wall_combined_height()) < EPSILON &&
                         is_perimeter_compatible(*m_object->print(), this_region, other_region))
 		            {
 			 			other_layerm->perimeters.clear();

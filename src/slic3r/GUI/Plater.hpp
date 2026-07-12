@@ -207,6 +207,12 @@ public:
     void show_SEMM_buttons();
     void update_dynamic_filament_list();
 
+    // ORCA multi-nozzle-size: per-nozzle sidebar tabs (Diameter + Preferred layer height).
+    // update_nozzle_settings() rebuilds the tabs; update_nozzle_values() refreshes the combo
+    // values in place and defers a rebuild when the extruder count changed.
+    void update_nozzle_settings();
+    void update_nozzle_values();
+
     PlaterPresetComboBox *  printer_combox();
     ObjectList*             obj_list();
     ObjectSettings*         obj_settings();
