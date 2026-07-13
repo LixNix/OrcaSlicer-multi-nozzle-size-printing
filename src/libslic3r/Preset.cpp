@@ -1178,6 +1178,9 @@ static std::vector<std::string> s_Preset_print_options{
     // ORCA: per-extruder layer height ("extruder_layer_height").
     "extruder_layer_height_mode",
     "extruder_layer_height_tolerance",
+    "split_wall_adjust",
+    "split_wall_adjust_filament",
+    "split_wall_adjust_direction",
     "support_bottom_interface_spacing",
     "enable_overhang_speed",
     "slowdown_for_curled_perimeters",
