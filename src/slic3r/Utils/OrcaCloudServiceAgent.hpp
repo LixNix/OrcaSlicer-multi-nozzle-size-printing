@@ -279,15 +279,15 @@ public:
     const PkceBundle& pkce();
     void regenerate_pkce();
 
-    void persist_refresh_token(const std::string& token);
-    bool load_refresh_token(std::string& out_token);
-    void clear_refresh_token();
+    void persist_user_secret(const std::string& secret);
+    bool load_user_secret(std::string& out_secret);
+    void clear_user_secret();
 
     // Token refresh helpers
     bool          refresh_if_expiring(std::chrono::seconds skew, const std::string& reason);
     RefreshResult refresh_from_storage(const std::string& reason, bool async = false);
     RefreshResult refresh_now(const std::string& refresh_token, const std::string& reason, bool async = false);
-    RefreshResult refresh_session_with_token(const std::string& refresh_token);
+    RefreshResult refresh_session_with_token(const std::string& refresh_token, const std::string& reason = "");
 
     // Session state helpers. nickname is the human-facing UI label after provider fallback resolution.
     bool set_user_session(const std::string& token,
@@ -295,10 +295,13 @@ public:
                           const std::string& username,
                           const std::string& nickname,
                           const std::string& avatar,
-                          const std::string& refresh_token = "");
+                          const std::string& refresh_token = "",
+                          bool persist = true);
     // Accepts either nested Orca cloud / GoTrue session JSON or flat WebView token JSON.
     bool set_user_session(const nlohmann::json& session_json, bool notify_login = true);
     void clear_session();
+
+    static std::string generate_uuid_for_setting_id(const std::string& name, const std::string& user_id = "");
 
 private:
     // Sync protocol helpers
@@ -347,6 +350,9 @@ private:
     std::string map_to_json(const std::map<std::string, std::string>& map);
     void json_to_map(const std::string& json, std::map<std::string, std::string>& map);
 
+    // Refresh token lock
+    std::string token_lock_path() const;
+
     // Member variables - configuration
     std::string log_dir;
     std::string config_dir;
@@ -361,11 +367,17 @@ private:
 
     // Member variables - auth state
     PkceBundle pkce_bundle;
-    std::string refresh_fallback_path;
+    std::string secret_fallback_path;
     SessionHandler session_handler;
     OnLoginCompleteHandler on_login_complete_handler;
     SessionInfo session;
     mutable std::mutex session_mutex;
+
+    // Refresh diagnostics (see docs/analysis/refresh_token_already_used.md). Epoch seconds so the
+    // refresh-failure log can report token staleness without holding a lock or logging any token.
+    std::atomic<long long> last_refresh_success_epoch{0};                 // 0 = no success yet this process
+    const long long        agent_start_epoch{std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::system_clock::now().time_since_epoch()).count()};
 
     // Member variables - connection state
     bool is_connected{false};

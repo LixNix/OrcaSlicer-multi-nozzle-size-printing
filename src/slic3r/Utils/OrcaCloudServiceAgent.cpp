@@ -31,14 +31,20 @@
 #include <wx/filefn.h>
 #include <wx/secretstore.h>
 #include <wx/stdpaths.h>
+#include <wx/app.h>
 #include <wx/utils.h>
 
 #if defined(_WIN32)
 #include <Windows.h>
 #endif
 
-#if defined(__APPLE__)
+#if !defined(_WIN32)
 #include <unistd.h>
+#include <fcntl.h>
+#include <cerrno>
+#endif
+
+#if defined(__APPLE__)
 #include <uuid/uuid.h>
 #endif
 
@@ -75,6 +81,60 @@ constexpr const char* SECRET_STORE_SERVICE = "OrcaSlicer/Auth";
 constexpr const char* SECRET_STORE_USER    = "orca_refresh_token";
 constexpr std::chrono::seconds TOKEN_REFRESH_SKEW{900}; // 15 minutes
 
+// Cross-process advisory lock serializing refresh-token rotation between Orca instances on
+// this machine. The Supabase refresh token rotates on every use, so read -> spend -> write-back
+// of the rotated successor must be one critical section across processes; otherwise a second
+// instance can re-spend a token a peer already rotated, triggering `refresh_token_already_used`.
+// Blocks until acquired (kernel sleep, no CPU spin). It cannot deadlock permanently because the
+// refresh POST is bounded (http_post_token uses timeout_max) and both back-ends release
+// automatically if the holder dies. Same machine only; cross-device concurrency is still
+// governed by the server's reuse-detection grace window.
+class InterProcessRefreshTokenLock
+{
+public:
+    explicit InterProcessRefreshTokenLock(const std::string& path)
+    {
+        if (path.empty()) { m_locked = true; return; } // no path -> proceed unsynchronized
+#if defined(_WIN32)
+        const std::wstring name = L"Local\\OrcaTokenRefresh_" + std::to_wstring(std::hash<std::string>{}(path));
+        m_handle = ::CreateMutexW(nullptr, FALSE, name.c_str());
+        if (!m_handle) { m_locked = true; return; }               // can't create -> don't block
+        const DWORD r = ::WaitForSingleObject(m_handle, INFINITE); // blocks, no spin
+        m_locked = (r == WAIT_OBJECT_0 || r == WAIT_ABANDONED);    // ABANDONED: prior holder crashed
+#else
+        m_fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (m_fd == -1) { m_locked = true; return; }              // can't open -> don't block
+        struct flock fl{};
+        fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET; fl.l_start = 0; fl.l_len = 0;
+        int rc;
+        do { rc = ::fcntl(m_fd, F_SETLKW, &fl); } while (rc == -1 && errno == EINTR); // blocks in kernel
+        m_locked = (rc != -1);
+#endif
+    }
+
+    ~InterProcessRefreshTokenLock()
+    {
+#if defined(_WIN32)
+        if (m_handle) { if (m_locked) ::ReleaseMutex(m_handle); ::CloseHandle(m_handle); }
+#else
+        if (m_fd != -1) ::close(m_fd); // closing the fd releases the lock we hold
+#endif
+    }
+
+    bool locked() const { return m_locked; }
+
+    InterProcessRefreshTokenLock(const InterProcessRefreshTokenLock&)            = delete;
+    InterProcessRefreshTokenLock& operator=(const InterProcessRefreshTokenLock&) = delete;
+
+private:
+    bool m_locked = false;
+#if defined(_WIN32)
+    HANDLE m_handle = nullptr;
+#else
+    int    m_fd = -1;
+#endif
+};
+
 // Return a JSON field only when it is present as a string. Missing or non-string values normalize to empty.
 std::string get_json_string_field(const json& j, const std::string& key)
 {
@@ -99,24 +159,6 @@ std::string resolve_display_name(
     if (!full_name.empty()) return full_name;
     if (!name.empty()) return name;
     return username;
-}
-
-std::string generate_uuid_for_setting_id(const std::string& name, const std::string& user_id = "")
-{
-    if (name.empty()) {
-        return "";
-    }
-
-    // Mix user_id into the hashed input so two different users generating a setting_id
-    // for an identically-named preset get distinct UUIDs. Without this, the cloud's ID
-    // space collides across accounts and the second user's create gets HTTP 409 with
-    // server_profile=null on every sync (the foreign owner's record is not exposed).
-    static const boost::uuids::uuid orca_namespace =
-        boost::uuids::string_generator()("f47ac10b-58cc-4372-a567-0e02b2c3d479");
-
-    boost::uuids::name_generator_sha1 gen(orca_namespace);
-    boost::uuids::uuid id = user_id.empty() ? gen(name) : gen(user_id + "/" + name);
-    return boost::uuids::to_string(id);
 }
 
 std::string base64url_encode(const std::vector<unsigned char>& data)
@@ -412,6 +454,24 @@ OrcaCloudServiceAgent::~OrcaCloudServiceAgent()
     }
 }
 
+std::string OrcaCloudServiceAgent::generate_uuid_for_setting_id(const std::string& name, const std::string& user_id)
+{
+    if (name.empty()) {
+        return "";
+    }
+
+    // Mix user_id into the hashed input so two different users generating a setting_id
+    // for an identically-named preset get distinct UUIDs. Without this, the cloud's ID
+    // space collides across accounts and the second user's create gets HTTP 409 with
+    // server_profile=null on every sync (the foreign owner's record is not exposed).
+    static const boost::uuids::uuid orca_namespace =
+        boost::uuids::string_generator()("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+
+    boost::uuids::name_generator_sha1 gen(orca_namespace);
+    boost::uuids::uuid id = user_id.empty() ? gen(name) : gen(user_id + "/" + name);
+    return boost::uuids::to_string(id);
+}
+
 void OrcaCloudServiceAgent::configure_urls(AppConfig* app_config)
 {
     if (!app_config) return;
@@ -479,7 +539,7 @@ int OrcaCloudServiceAgent::set_config_dir(std::string cfg_dir)
     config_dir = cfg_dir;
     wxFileName fallback(wxString::FromUTF8(cfg_dir.c_str()), "orca_refresh_token.sec");
     fallback.Normalize();
-    refresh_fallback_path = fallback.GetFullPath().ToStdString();
+    secret_fallback_path = fallback.GetFullPath().ToStdString();
     return BAMBU_NETWORK_SUCCESS;
 }
 
@@ -497,14 +557,71 @@ int OrcaCloudServiceAgent::set_country_code(std::string code)
     return BAMBU_NETWORK_SUCCESS;
 }
 
+/// Decode a saved user session or a refresh token.
+///
+/// Returns `false` if invalid input, and a re-authentication is required.
+///
+/// If returns `true`, `out_refresh_token` will contain the user refresh token, and `out_session` can be one of two scenarios:
+/// - if `out_session.logged_in` is `true`, then `out_session.refresh_token` and `out_session.user_id` are guaranteed to be present,
+///   and a refresh is not necessarily required until you need to make any network call
+/// - otherwise if `out_session.logged_in` is `false`, you should do a refresh immediately to get the user information before proceed,
+///   otherwise user will be logged out
+static bool parse_stored_secret(const std::string& secret, std::string& out_refresh_token, OrcaCloudServiceAgent::SessionInfo& out_session)
+{
+    out_refresh_token.clear();
+    out_session = OrcaCloudServiceAgent::SessionInfo{};
+
+    try {
+        // Valid secret should be a json object, otherwise it's a plain refresh token
+        const json secret_json = json::parse(secret, nullptr, false);
+        if (secret_json.type() != json::value_t::object) {
+            out_refresh_token = secret;
+            return true;
+        }
+
+        OrcaCloudServiceAgent::SessionInfo user_session{};
+        user_session.refresh_token = get_json_string_field(secret_json, "refresh_token");
+        user_session.user_id       = get_json_string_field(secret_json, "user_id");
+        user_session.user_name     = get_json_string_field(secret_json, "username");
+        user_session.user_nickname = get_json_string_field(secret_json, "nickname");
+        user_session.logged_in     = true;
+        // User session, must at least contains refresh token and user id
+        if (user_session.refresh_token.empty() || user_session.user_id.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: secret does not contain valid user session, force re-authentication";
+            return false;
+        }
+
+        out_refresh_token = user_session.refresh_token;
+        out_session       = std::move(user_session);
+        return true;
+    } catch (const std::exception&) {
+        BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: parse_stored_secret exception, force re-authentication";
+        return false;
+    }
+}
+
 int OrcaCloudServiceAgent::start()
 {
     regenerate_pkce();
 
     // Attempt silent sign-in from stored refresh token
-    std::string stored_refresh;
-    if (load_refresh_token(stored_refresh) && !stored_refresh.empty()) {
-        refresh_now(stored_refresh, "refresh token", false);
+    std::string stored_secret;
+    if (load_user_secret(stored_secret) && !stored_secret.empty()) {
+        // Backward compatibility: if secret it a json, then read it as use session,
+        // which allows us to refresh it in a background thread to speed up the app startup;
+        // otherwise it's a plain refresh token, then we force a sync refresh
+        std::string refresh_token;
+        SessionInfo stored_session;
+        if (parse_stored_secret(stored_secret, refresh_token, stored_session)) {
+            if (stored_session.logged_in) {
+                // We have a previously saved user session, use it. Skip re-persisting: the secret was
+                // just loaded from disk, so writing the identical bytes back is wasted startup I/O.
+                set_user_session(stored_session.access_token, stored_session.user_id, stored_session.user_name,
+                                 stored_session.user_nickname, stored_session.user_avatar, stored_session.refresh_token,
+                                 /*persist=*/false);
+            }
+            refresh_now(refresh_token, "refresh token", stored_session.logged_in);
+        }
     }
 
     return BAMBU_NETWORK_SUCCESS;
@@ -1250,8 +1367,10 @@ SyncPushResult OrcaCloudServiceAgent::sync_push(const std::string& profile_id,
 
     if (http_code == 409) {
         // Conflict - parse server version
+        nlohmann::json err_body;
         try {
             auto json = nlohmann::json::parse(response);
+            err_body = json;
             if (json.is_null()) {
                 result.server_deleted = true;
             } else {
@@ -1261,6 +1380,13 @@ SyncPushResult OrcaCloudServiceAgent::sync_push(const std::string& profile_id,
                 result.server_version.updated_time = profile_data.value(ORCA_JSON_KEY_UPDATE_TIME, 0);
             }
         } catch (...) {}
+        // Surface the conflict via the http-error callback with the local preset name injected.
+        // The raw server body omits the name for tombstone (-3) conflicts (server_profile is null),
+        // but the GUI needs it to regenerate the deterministic setting_id for a force push.
+        if (!err_body.is_object())
+            err_body = nlohmann::json::object();
+        err_body["name"] = name;
+        invoke_http_error_callback(409, err_body.dump());
         result.error_message = response;
         return result;
     }
@@ -1378,10 +1504,10 @@ void OrcaCloudServiceAgent::update_redirect_uri()
 // Auth - Token Persistence
 // ============================================================================
 
-void OrcaCloudServiceAgent::persist_refresh_token(const std::string& token)
+void OrcaCloudServiceAgent::persist_user_secret(const std::string& secret)
 {
-    if (token.empty()) {
-        clear_refresh_token();
+    if (secret.empty()) {
+        clear_user_secret();
         return;
     }
 
@@ -1391,13 +1517,13 @@ void OrcaCloudServiceAgent::persist_refresh_token(const std::string& token)
         // Use encrypted file only
         auto key = sha256_bytes(get_encryption_key());
         if (key.empty()) {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot derive key for refresh-token file storage";
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot derive key for user secret file storage";
             return;
         }
 
         std::string payload;
-        if (!aes256gcm_encrypt(token, key, payload)) {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to encrypt refresh token for file storage";
+        if (!aes256gcm_encrypt(secret, key, payload)) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to encrypt user secret for file storage";
             return;
         }
 
@@ -1407,34 +1533,38 @@ void OrcaCloudServiceAgent::persist_refresh_token(const std::string& token)
         }
 
         compute_fallback_path();
-        wxFileName path(wxString::FromUTF8(refresh_fallback_path.c_str()));
+        if (secret_fallback_path.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no user secret storage path available; skipping file persistence";
+            return;
+        }
+        wxFileName path(wxString::FromUTF8(secret_fallback_path.c_str()));
         path.Normalize();
         if (!wxFileName::DirExists(path.GetPath())) {
             wxFileName::Mkdir(path.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
         }
 
-        const std::string tmp_path = refresh_fallback_path + ".tmp";
+        const std::string tmp_path = secret_fallback_path + ".tmp";
         std::ofstream ofs(tmp_path, std::ios::out | std::ios::trunc | std::ios::binary);
         if (ofs.good()) {
             ofs << signed_payload;
             ofs.flush();
             ofs.close();
 
-            if (wxRenameFile(wxString::FromUTF8(tmp_path.c_str()), wxString::FromUTF8(refresh_fallback_path.c_str()), true)) {
+            if (wxRenameFile(wxString::FromUTF8(tmp_path.c_str()), wxString::FromUTF8(secret_fallback_path.c_str()), true)) {
                 stored = true;
             } else {
                 wxRemoveFile(wxString::FromUTF8(tmp_path.c_str()));
-                BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to atomically replace refresh-token file";
+                BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to atomically replace user secret file";
             }
         } else {
-            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot open refresh-token file for write - " << refresh_fallback_path;
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot open user secret file for write - " << secret_fallback_path;
         }
     } else {
         // Use wxSecretStore only
         wxSecretStore store = wxSecretStore::GetDefault();
         if (store.IsOk()) {
-            wxSecretValue secret(wxString::FromUTF8(token.c_str()));
-            if (store.Save(SECRET_STORE_SERVICE, SECRET_STORE_USER, secret)) {
+            wxSecretValue secret_value(wxString::FromUTF8(secret.c_str()));
+            if (store.Save(SECRET_STORE_SERVICE, SECRET_STORE_USER, secret_value)) {
                 stored = true;
             } else {
                 BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: System Keychain save failed";
@@ -1447,15 +1577,15 @@ void OrcaCloudServiceAgent::persist_refresh_token(const std::string& token)
     (void) stored;
 }
 
-bool OrcaCloudServiceAgent::load_refresh_token(std::string& out_token)
+bool OrcaCloudServiceAgent::load_user_secret(std::string& out_secret)
 {
-    out_token.clear();
+    out_secret.clear();
 
     if (m_use_encrypted_token_file) {
         // Load from encrypted file only
         compute_fallback_path();
-        if (wxFileExists(wxString::FromUTF8(refresh_fallback_path.c_str()))) {
-            std::ifstream ifs(refresh_fallback_path, std::ios::binary);
+        if (wxFileExists(wxString::FromUTF8(secret_fallback_path.c_str()))) {
+            std::ifstream ifs(secret_fallback_path, std::ios::binary);
             std::string payload((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
             auto key = sha256_bytes(get_encryption_key());
             std::string plain;
@@ -1478,16 +1608,16 @@ bool OrcaCloudServiceAgent::load_refresh_token(std::string& out_token)
                         std::transform(computed_hmac.begin(), computed_hmac.end(), computed_hmac.begin(), ::tolower);
                         if (computed_hmac.empty() || computed_hmac != lower_stored) {
                             integrity_ok = false;
-                            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: refresh token integrity check failed (HMAC mismatch)";
+                            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: user secret integrity check failed (HMAC mismatch)";
                         }
                     }
                 }
 
                 if (integrity_ok && aes256gcm_decrypt(encoded_payload, key, plain) && !plain.empty()) {
-                    out_token = plain;
+                    out_secret = plain;
                     // Upgrade legacy payloads to signed format
                     if (payload.rfind("v2:", 0) != 0) {
-                        persist_refresh_token(out_token);
+                        persist_user_secret(out_secret);
                     }
                     return true;
                 }
@@ -1499,8 +1629,8 @@ bool OrcaCloudServiceAgent::load_refresh_token(std::string& out_token)
             wxString username;
             wxSecretValue secret;
             if (store.Load(SECRET_STORE_SERVICE, username, secret) && secret.IsOk()) {
-                out_token.assign(static_cast<const char*>(secret.GetData()), secret.GetSize());
-                if (!out_token.empty()) {
+                out_secret.assign(static_cast<const char*>(secret.GetData()), secret.GetSize());
+                if (!out_secret.empty()) {
                     return true;
                 }
             }
@@ -1510,7 +1640,7 @@ bool OrcaCloudServiceAgent::load_refresh_token(std::string& out_token)
     return false;
 }
 
-void OrcaCloudServiceAgent::clear_refresh_token()
+void OrcaCloudServiceAgent::clear_user_secret()
 {
     wxSecretStore store = wxSecretStore::GetDefault();
     if (store.IsOk()) {
@@ -1518,8 +1648,8 @@ void OrcaCloudServiceAgent::clear_refresh_token()
     }
 
     compute_fallback_path();
-    if (!refresh_fallback_path.empty() && wxFileExists(wxString::FromUTF8(refresh_fallback_path.c_str()))) {
-        wxRemoveFile(wxString::FromUTF8(refresh_fallback_path.c_str()));
+    if (!secret_fallback_path.empty() && wxFileExists(wxString::FromUTF8(secret_fallback_path.c_str()))) {
+        wxRemoveFile(wxString::FromUTF8(secret_fallback_path.c_str()));
     }
 }
 
@@ -1578,8 +1708,7 @@ RefreshResult OrcaCloudServiceAgent::refresh_now(const std::string& refresh_toke
     }
 
     auto worker = [this, refresh_token, reason]() {
-        (void) reason;
-        RefreshResult r = refresh_session_with_token(refresh_token);
+        RefreshResult r = refresh_session_with_token(refresh_token, reason);
         refresh_running.store(false);
         return r;
     };
@@ -1599,16 +1728,39 @@ RefreshResult OrcaCloudServiceAgent::refresh_now(const std::string& refresh_toke
 
 RefreshResult OrcaCloudServiceAgent::refresh_from_storage(const std::string& reason, bool async)
 {
-    std::string refresh_token = get_refresh_token();
-    if (refresh_token.empty()) {
-        load_refresh_token(refresh_token);
+    (void) async; // currently all callers are calling this function synchronous anyway
+
+    // Blocks until we own the lock (kernel sleep, no spin). Cannot deadlock permanently:
+    // the refresh POST is bounded (http_post_token timeout_max) and the lock auto-releases
+    // on process death, so no holder can keep it longer than that bound.
+    InterProcessRefreshTokenLock lock(token_lock_path());
+    if (!lock.locked()) {
+        // Lock syscall genuinely failed (rare). Proceed best-effort rather than give up.
+        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: token refresh lock unavailable, "
+                                      "proceeding unsynchronized (reason=" << reason << ")";
     }
+
+    std::string refresh_token;
+    std::string user_secret;
+
+    // We read the refresh token from the OS keychain as the source of truth
+    if (load_user_secret(user_secret) && !user_secret.empty()) {
+        SessionInfo stored_session;
+        parse_stored_secret(user_secret, refresh_token, stored_session);
+    }
+
+    // We only read from memory if the read from OS keychain fails
+    if (refresh_token.empty())
+        refresh_token = get_refresh_token();
+
     if (refresh_token.empty()) {
         BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no refresh token available for refresh (reason=" << reason << ")";
         return RefreshResult::AuthRejected;  // no persisted token: nothing to preserve
     }
 
-    return refresh_now(refresh_token, reason, async);
+    // Synchronous: hold the lock across the network round-trip AND the write-back that
+    // set_user_session performs, so the rotation is atomic w.r.t. other instances.
+    return refresh_now(refresh_token, reason, /*async=*/false);
 }
 
 bool OrcaCloudServiceAgent::refresh_if_expiring(std::chrono::seconds skew, const std::string& reason)
@@ -1621,8 +1773,14 @@ bool OrcaCloudServiceAgent::refresh_if_expiring(std::chrono::seconds skew, const
 
     if (!needs_refresh) return true;
 
-    if (refresh_from_storage(reason, false) == RefreshResult::Success) return true;
+    // First attempt. refresh_from_storage blocks on the cross-process lock and reads the
+    // freshest token from the store, so cross-instance contention is already resolved here.
+    RefreshResult r = refresh_from_storage(reason, false);
+    if (r == RefreshResult::Success)      return true;
+    if (r == RefreshResult::AuthRejected) return false;  // definitive: retrying the same token can't help
 
+    // One retry, only for a transient network failure of the refresh POST (lost response,
+    // timeout, 429/5xx -> Transient). The retry re-acquires the lock and re-reads the store.
     std::this_thread::sleep_for(std::chrono::milliseconds(750));
     return refresh_from_storage(reason + "_retry", false) == RefreshResult::Success;
 }
@@ -1641,7 +1799,23 @@ static RefreshResult classify_refresh_result(unsigned http_code, bool session_es
                               : RefreshResult::Transient;  // 2xx but unusable body
 }
 
-RefreshResult OrcaCloudServiceAgent::refresh_session_with_token(const std::string& refresh_token)
+// Best-effort extraction of GoTrue's "error_code" field (e.g. "refresh_token_already_used").
+// Returns "" if the body is not a JSON object or lacks the field.
+static std::string extract_error_code(const std::string& body)
+{
+    const json j = json::parse(body, nullptr, false);
+    if (j.is_object())
+        return get_json_string_field(j, "error_code");
+    return "";
+}
+
+static long long now_epoch_seconds()
+{
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+RefreshResult OrcaCloudServiceAgent::refresh_session_with_token(const std::string& refresh_token, const std::string& reason)
 {
     std::string body = "{\"refresh_token\":\"" + refresh_token + "\"}";
     std::string url = auth_base_url + auth_constants::TOKEN_PATH + "?grant_type=refresh_token";
@@ -1649,6 +1823,12 @@ RefreshResult OrcaCloudServiceAgent::refresh_session_with_token(const std::strin
     unsigned int http_code = 0;
     // http_post_token sets http_code to 0 when the server could not be reached.
     http_post_token(body, &response, &http_code, url);
+
+    const long long now_s   = now_epoch_seconds();
+    const long long last_ok = last_refresh_success_epoch.load(std::memory_order_relaxed);
+    const long long since_last_ok = (last_ok == 0) ? -1 : (now_s - last_ok); // -1 = no success yet this process
+    const long long since_start   = now_s - agent_start_epoch;
+    const std::string log_reason  = reason.empty() ? "-" : reason;
 
     bool established = false;
     if (http_code >= 200 && http_code < 300) {
@@ -1663,10 +1843,47 @@ RefreshResult OrcaCloudServiceAgent::refresh_session_with_token(const std::strin
                 BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: token refresh parse exception - " << e.what();
             }
         }
+        if (established) {
+            last_refresh_success_epoch.store(now_s, std::memory_order_relaxed);
+            BOOST_LOG_TRIVIAL(info) << "[auth] event=refresh_ok reason=" << log_reason
+                                    << " secs_since_last_success=" << since_last_ok;
+        }
     } else {
+        // Diagnostics to classify a future refresh_token_already_used incident from logs alone
+        //  - secs_since_last_success large (or -1 = none this process) => stale token beyond the
+        //    reuse-grace window (the ">1h gap" residual).
+        //  - stored_differs=true => another instance/device already rotated the token in the
+        //    shared secret store (the multi-session residual).
+        const std::string error_code = extract_error_code(response);
+
+        // Only meaningful when the server actually rejected us (not a bare transport failure).
+        bool stored_present = false, stored_differs = false;
+        if (http_code >= 400) {
+            std::string stored_secret, stored_token;
+            SessionInfo ignored;
+            if (load_user_secret(stored_secret) && !stored_secret.empty()
+                && parse_stored_secret(stored_secret, stored_token, ignored) && !stored_token.empty()) {
+                stored_present = true;
+                stored_differs = (stored_token != refresh_token);
+            }
+        }
+
+        std::string user_id_copy;
+        {
+            std::lock_guard<std::mutex> lock(session_mutex);
+            user_id_copy = session.user_id;
+        }
+
         std::string truncated_response = response.size() > 200 ? response.substr(0, 200) + "..." : response;
-        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: token refresh failed - http_code=" << http_code
-                                   << ", response_body=" << truncated_response;
+        BOOST_LOG_TRIVIAL(warning) << "[auth] event=refresh_rejected http_code=" << http_code
+                                   << " error_code=" << (error_code.empty() ? "-" : error_code)
+                                   << " reason=" << log_reason
+                                   << " stored_present=" << (stored_present ? "true" : "false")
+                                   << " stored_differs=" << (stored_differs ? "true" : "false")
+                                   << " secs_since_last_success=" << since_last_ok
+                                   << " secs_since_start=" << since_start
+                                   << " user_id=" << (user_id_copy.empty() ? "-" : user_id_copy)
+                                   << " response_body=" << truncated_response;
     }
 
     return classify_refresh_result(http_code, established);
@@ -1681,7 +1898,8 @@ bool OrcaCloudServiceAgent::set_user_session(const std::string& token,
                                      const std::string& username,
                                      const std::string& nickname,
                                      const std::string& avatar,
-                                     const std::string& refresh_token)
+                                     const std::string& refresh_token,
+                                     bool persist)
 {
     std::chrono::system_clock::time_point exp_tp{};
     decode_jwt_expiry(token, exp_tp);
@@ -1698,8 +1916,17 @@ bool OrcaCloudServiceAgent::set_user_session(const std::string& token,
         session.logged_in = true;
     }
 
-    if (!refresh_token.empty()) {
-        persist_refresh_token(refresh_token);
+    if (persist) {
+        // Store user session on disk to not block use from using
+        // an already logged in account if internet is not available.
+        // Don't store access token though, we should always refresh it
+        // once user is back online.
+        json sec             = json::object();
+        sec["refresh_token"] = refresh_token;
+        sec["user_id"]       = user_id;
+        sec["username"]      = username;
+        sec["nickname"]      = nickname;
+        persist_user_secret(sec.dump());
     }
 
     // Set per-user sync state path
@@ -1775,7 +2002,7 @@ void OrcaCloudServiceAgent::clear_session()
         std::lock_guard<std::mutex> lock(session_mutex);
         session = SessionInfo{};
     }
-    clear_refresh_token();
+    clear_user_secret();
 }
 
 // ============================================================================
@@ -1937,7 +2164,10 @@ int OrcaCloudServiceAgent::http_post(const std::string& path, const std::string&
     if (response_body) *response_body = res.body;
     if (http_code) *http_code = res.status;
 
-    if (!suppress && (!res.success || res.status >= 400)) {
+    // 409 is a push-only domain conflict; sync_push re-fires the error callback with the
+    // local preset name injected (the raw server body omits it for tombstone conflicts),
+    // so skip the generic nameless auto-fire here to avoid a duplicate, nameless event.
+    if (!suppress && (!res.success || res.status >= 400) && res.status != 409) {
         invoke_http_error_callback(res.status, res.body);
     }
 
@@ -2118,6 +2348,9 @@ bool OrcaCloudServiceAgent::http_post_token(const std::string& body, std::string
                 resp_body = body;
                 BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: HTTP error - " << error;
             })
+            // Keep this timeout finite: refresh_from_storage holds a cross-process lock across
+            // this call, so an unbounded refresh POST would let one instance wedge token refresh
+            // for every other Orca instance on the machine.
             .timeout_max(30)
             .perform_sync();
 
@@ -2207,10 +2440,18 @@ bool OrcaCloudServiceAgent::http_post_auth(const std::string& path, const std::s
 
 void OrcaCloudServiceAgent::compute_fallback_path()
 {
-    if (!refresh_fallback_path.empty()) return;
+    if (!secret_fallback_path.empty())
+        return;
+    // wxStandardPaths::GetUserDataDir() resolves the app data directory via
+    // wxAppConsoleBase::GetAppName(), which dereferences wxTheApp. In headless
+    // contexts (CLI, unit tests) there is no wxApp, so guard the call to avoid a
+    // null dereference. The path can still be provided explicitly through
+    // set_config_dir(); when it is left empty, file persistence is skipped.
+    if (wxTheApp == nullptr)
+        return;
     wxFileName fallback(wxStandardPaths::Get().GetUserDataDir(), "orca_refresh_token.sec");
     fallback.Normalize();
-    refresh_fallback_path = fallback.GetFullPath().ToStdString();
+    secret_fallback_path = fallback.GetFullPath().ToStdString();
 }
 
 // ============================================================================
@@ -2745,6 +2986,15 @@ int OrcaCloudServiceAgent::get_shared_bundle(const std::string& bundle_id, std::
         BOOST_LOG_TRIVIAL(error) << "get_shared_bundle: JSON parse error: " << e.what();
         return -1;
     }
+}
+
+std::string OrcaCloudServiceAgent::token_lock_path() const
+{
+    if (config_dir.empty())
+        return {};
+    wxFileName lock(wxString::FromUTF8(config_dir.c_str()), "orca_refresh_token.lock");
+    lock.Normalize();
+    return lock.GetFullPath().ToStdString();
 }
 
 } // namespace Slic3r
