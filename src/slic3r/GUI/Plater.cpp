@@ -3083,17 +3083,8 @@ void Sidebar::update_presets(Preset::Type preset_type)
 
         // ORCA multi-nozzle-size: the per-nozzle tabs follow the printer preset (nozzle count,
         // available variants, per-nozzle values). layout_printer() above decided whether they
-        // are shown. The rebuild must be deferred: update_presets() re-enters synchronously
-        // from Tab::load_config (update_dirty -> on_presets_changed) when the tabs' own combo
-        // handlers change the printer config, and rebuilding here would destroy the combo that
-        // is still dispatching its selection event.
-        if (!p->m_nozzle_rebuild_scheduled) {
-            p->m_nozzle_rebuild_scheduled = true;
-            wxGetApp().CallAfter([this]() {
-                p->m_nozzle_rebuild_scheduled = false;
-                update_nozzle_settings();
-            });
-        }
+        // are shown.
+        schedule_nozzle_settings_rebuild();
 
         Layout();
 
@@ -3121,6 +3112,14 @@ static wxString nozzle_combo_label(double value)
     return wxString(oss.str()) + "mm";
 }
 
+// Numeric part of a nozzle_combo_label() item ("0.4mm" -> "0.4"); parse with ToCDouble().
+static wxString nozzle_combo_number(wxString label)
+{
+    if (label.EndsWith("mm"))
+        label.RemoveLast(2);
+    return label;
+}
+
 // Show THIS nozzle's own diameter (per-nozzle sizes are supported), selecting the matching
 // "x.xmm" item so the read-only combo accepts it. Falls back to the uniform printer_variant
 // label only when the per-nozzle value is unavailable.
@@ -3128,12 +3127,9 @@ static void select_nozzle_diameter_label(ComboBox *diameter_combo, double this_n
 {
     wxString this_label;
     for (unsigned int n = 0; n < diameter_combo->GetCount(); ++n) {
-        wxString item = diameter_combo->GetString(n);
-        wxString num  = item;
-        if (num.EndsWith("mm"))
-            num.RemoveLast(2);
+        const wxString item = diameter_combo->GetString(n);
         double item_nd = 0.;
-        if (num.ToCDouble(&item_nd) && std::abs(item_nd - this_nd) < EPSILON) {
+        if (nozzle_combo_number(item).ToCDouble(&item_nd) && std::abs(item_nd - this_nd) < EPSILON) {
             this_label = item;
             break;
         }
@@ -3199,6 +3195,21 @@ static void fill_nozzle_layer_height_combo(ComboBox *combo, size_t extruder_idx)
     combo->SetValue(current_label.empty() ? _L("Default") : current_label);
 }
 
+// ORCA multi-nozzle-size: rebuild the per-nozzle tabs on the next idle round. A synchronous
+// rebuild could destroy a combo that is still dispatching the very event which got us here
+// (e.g. update_presets() re-enters from Tab::load_config when a tab's combo handler changes
+// the printer config).
+void Sidebar::schedule_nozzle_settings_rebuild()
+{
+    if (p->m_nozzle_rebuild_scheduled)
+        return;
+    p->m_nozzle_rebuild_scheduled = true;
+    wxGetApp().CallAfter([this]() {
+        p->m_nozzle_rebuild_scheduled = false;
+        update_nozzle_settings();
+    });
+}
+
 // ORCA multi-nozzle-size: rebuild the per-nozzle tabs (one page per extruder, with a Diameter
 // and a Preferred layer height combo) from the edited printer and process presets. Ported from
 // Snapmaker Orca's sidebar.
@@ -3258,9 +3269,7 @@ void Sidebar::update_nozzle_settings()
             // nozzles to the same size and defeat per-nozzle sizes.
 
             // Parse the selected diameter from the "0.4mm" combo item.
-            wxString sel_num = diameter_combo->GetValue();
-            if (sel_num.EndsWith("mm"))
-                sel_num.RemoveLast(2);
+            const wxString sel_num = nozzle_combo_number(diameter_combo->GetValue());
             double new_nd = 0.;
             if (!sel_num.ToCDouble(&new_nd) || new_nd <= 0.)
                 return;
@@ -3368,11 +3377,8 @@ void Sidebar::update_nozzle_settings()
 
         lh_combo->Bind(wxEVT_COMBOBOX, [lh_combo, i](wxCommandEvent& event) {
             // "Default" (or anything non-numeric) clears the preference: 0 = object layer height.
-            wxString sel = lh_combo->GetValue();
-            if (sel.EndsWith("mm"))
-                sel.RemoveLast(2);
             double new_height = 0.;
-            if (!sel.ToCDouble(&new_height) || new_height < 0.)
+            if (!nozzle_combo_number(lh_combo->GetValue()).ToCDouble(&new_height) || new_height < 0.)
                 new_height = 0.;
 
             Tab* printer_tab = wxGetApp().get_tab(Preset::TYPE_PRINTER);
@@ -3405,29 +3411,9 @@ void Sidebar::update_nozzle_settings()
 
         nozzle_panel->SetSizer(tab_sizer);
 
-        wxString tab_name;
-        switch (new_nozzle_count)
-        {
-        case 1:
-        {
-            tab_name = _L("Nozzle");
-            break;
-        }
-        case 2:
-        {
-            if (i == 0)
-                tab_name = _L("Left Nozzle");
-            else
-                tab_name = _L("Right Nozzle");
-
-            break;
-        }
-        default:
-        {
-            tab_name = wxString(_L("Nozzle")) + wxString::Format(" %d", int(i + 1));
-        }
-
-        }
+        const wxString tab_name = new_nozzle_count == 1 ? _L("Nozzle") :
+            new_nozzle_count == 2 ? (i == 0 ? _L("Left Nozzle") : _L("Right Nozzle")) :
+                                    wxString(_L("Nozzle")) + wxString::Format(" %d", int(i + 1));
         p->m_nozzle_notebook->AddPage(nozzle_panel, tab_name);
     }
 
@@ -3451,17 +3437,9 @@ void Sidebar::update_nozzle_values()
         wxGetApp().preset_bundle->printers.get_edited_preset().config.option("nozzle_diameter"));
     const size_t nozzle_count = nozzle_diameter != nullptr ? nozzle_diameter->values.size() : 1;
     if (nozzle_count != p->m_nozzle_notebook->GetPageCount()) {
-        // Defer the rebuild: this can be reached from an event handler of a control that lives
-        // on one of the pages about to be destroyed. Tab visibility needs no refresh here:
-        // every flow that changes the extruder count also runs update_presets(TYPE_PRINTER),
-        // whose layout_printer() call recomputes it synchronously.
-        if (!p->m_nozzle_rebuild_scheduled) {
-            p->m_nozzle_rebuild_scheduled = true;
-            wxGetApp().CallAfter([this]() {
-                p->m_nozzle_rebuild_scheduled = false;
-                update_nozzle_settings();
-            });
-        }
+        // Tab visibility needs no refresh here: every flow that changes the extruder count also
+        // runs update_presets(TYPE_PRINTER), whose layout_printer() recomputes it synchronously.
+        schedule_nozzle_settings_rebuild();
         return;
     }
     if (nozzle_diameter != nullptr)

@@ -35,12 +35,11 @@ Flow LayerRegion::bridging_flow(FlowRole role, bool thick_bridge, unsigned int f
     const PrintRegionConfig &region_config  = region.config();
     const PrintObject       &print_object   = *this->layer()->object();
     Flow bridge_flow;
-    // 2-extruder BBL-style printers reroute filaments through the filament map (matches PrintRegion::flow()).
-    // Here this->extruder(role) - 1 may underflow to MAX_INT, but then the get_at() will fall back to zero'th element, so everything is all right.
+    // A zero filament (no default extruder) underflows to MAX_INT; get_at() then falls back to the zero'th element.
     const PrintConfig &bridge_print_config = print_object.print()->config();
     const unsigned int bridge_filament = filament_id > 0 ? filament_id : region.extruder(role);
-    const size_t bridge_extruder_idx = bridge_filament > 0 && bridge_print_config.nozzle_diameter.size() == 2 && print_object.print()->is_BBL_printer() ?
-        get_extruder_index(bridge_print_config, bridge_filament - 1) : size_t(bridge_filament) - 1;
+    const size_t bridge_extruder_idx = bridge_filament > 0 ?
+        print_object.print()->extruder_index_of(bridge_filament - 1) : size_t(bridge_filament) - 1;
     auto nozzle_diameter = float(bridge_print_config.nozzle_diameter.get_at(bridge_extruder_idx));
     const ConfigOptionFloatOrPercent& bridge_width_opt = region_config.bridge_line_width;
     const double                      bridge_width      = bridge_width_opt.get_abs_value(nozzle_diameter);

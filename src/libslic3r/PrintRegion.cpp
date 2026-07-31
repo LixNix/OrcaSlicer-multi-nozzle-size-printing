@@ -49,12 +49,10 @@ Flow PrintRegion::flow(const PrintObject &object, FlowRole role, double layer_he
     
     // Get the configured nozzle_diameter for the extruder associated to the flow role requested,
     // or for the explicitly given filament when it differs from the role's default mapping (top / bottom surface fills).
-    // 2-extruder BBL-style printers reroute filaments through the filament map (matches
-    // Print::validate()'s width checks and extruder_preferred_layer_height()).
-    // Here this->extruder(role) - 1 may underflow to MAX_INT, but then the get_at() will follback to zero'th element, so everything is all right.
+    // A zero filament (no default extruder) underflows to MAX_INT; get_at() then falls back to the zero'th element.
     const unsigned int flow_filament = filament_id > 0 ? filament_id : this->extruder(role);
-    const size_t flow_extruder_idx = flow_filament > 0 && print_config.nozzle_diameter.size() == 2 && object.print()->is_BBL_printer() ?
-        get_extruder_index(print_config, flow_filament - 1) : size_t(flow_filament) - 1;
+    const size_t flow_extruder_idx = flow_filament > 0 ?
+        object.print()->extruder_index_of(flow_filament - 1) : size_t(flow_filament) - 1;
     auto nozzle_diameter = float(print_config.nozzle_diameter.get_at(flow_extruder_idx));
     return Flow::new_from_config_width(role, config_width, nozzle_diameter, float(layer_height));
 }
