@@ -158,14 +158,21 @@ void OptionsGroup::set_max_win_width(int max_win_width)
 
 void OptionsGroup::remove_option_if(std::function<bool(std::string const &)> const &comp)
 {
+    // m_options_mode holds one entry per option-carrying line only (append_line skips
+    // widget-only lines, append_separator skips separators), so it cannot be indexed by
+    // the m_lines position: erase by a mode index that advances on option lines alone.
+    size_t mode_idx = 0;
     for (auto &l : m_lines) {
+        const bool had_options = ! l.get_options().empty();
         auto &opts = const_cast<std::vector<Option> &>(l.get_options());
         opts.erase(std::remove_if(opts.begin(), opts.end(), [&comp](Option &o) { return comp(o.opt.opt_key); }), opts.end());
         l.undo_to_sys = true;
-    }
-    for (int i = m_lines.size() - 1; i >= 0; --i) {
-        if (m_lines[i].get_options().empty())
-            m_options_mode.erase(m_options_mode.begin() + i);
+        if (had_options) {
+            if (l.get_options().empty())
+                m_options_mode.erase(m_options_mode.begin() + mode_idx);
+            else
+                ++ mode_idx;
+        }
     }
     m_lines.erase(std::remove_if(m_lines.begin(), m_lines.end(), [](auto &l) { return l.get_options().empty(); }), m_lines.end());
     // TODO: remove items from g->m_options;
