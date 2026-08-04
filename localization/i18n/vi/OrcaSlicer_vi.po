@@ -20332,3 +20332,193 @@ msgstr ""
 #, c-format, boost-format
 #~ msgid "*Printing %s material with %s may cause nozzle damage"
 #~ msgstr "*In vật liệu %s với %s có thể gây hư hỏng đầu phun"
+
+msgid "Adjust wall layer height"
+msgstr "Điều chỉnh chiều cao lớp của thành"
+
+msgid "Adjusted walls"
+msgstr "Thành được điều chỉnh"
+
+msgid "Adjustment direction"
+msgstr "Hướng điều chỉnh"
+
+msgid "Consistent"
+msgstr "Nhất quán"
+
+msgid "Decrease"
+msgstr "Giảm"
+
+msgid "Fixed"
+msgstr "Cố định"
+
+msgid "How aggressively object parts assigned to an extruder with a thicker preferred layer height are combined into thick layers.\nConsistent: parts print with at most two layer heights, the extruder layer height wherever whole runs of layers fit and the object layer height everywhere else. This gives the most uniform walls.\nAdaptive: runs may also be combined at intermediate multiples of the object layer height, so more of the part prints with thicker layers, at the price of bands of varying layer heights on curved part boundaries.\nFixed: parts always print at the extruder layer height, even where the shape changes across the combined layers or overhangs; curved boundaries turn into steps and detail finer than the thick layers is lost. Only geometry too short for a whole thick layer (part tops and the first layer) prints thinner."
+msgstr "Mức độ tích cực khi các bộ phận được gán cho đầu đùn có chiều cao lớp ưu tiên dày hơn được gộp thành các lớp dày.\nNhất quán: các bộ phận in với tối đa hai chiều cao lớp - chiều cao lớp của đầu đùn ở nơi chứa vừa trọn các chuỗi lớp, và chiều cao lớp của vật thể ở mọi nơi khác. Cho thành đều nhất.\nThích ứng: các chuỗi cũng có thể được gộp ở các bội số trung gian của chiều cao lớp vật thể, nên nhiều phần hơn của bộ phận in bằng lớp dày, đổi lại là các dải chiều cao lớp thay đổi trên ranh giới cong.\nCố định: các bộ phận luôn in ở chiều cao lớp của đầu đùn, kể cả nơi hình dạng thay đổi qua các lớp gộp hoặc nhô ra; ranh giới cong biến thành bậc thang và chi tiết mịn hơn các lớp dày bị mất. Chỉ hình học quá ngắn cho một lớp dày trọn vẹn (đỉnh bộ phận và lớp đầu tiên) in mỏng hơn."
+
+msgid "How far the outline of an object part assigned to an extruder with a thicker preferred layer height may drift sideways across the layers of one thick run and still be combined, as a percentage of that extruder's nozzle diameter. Higher values combine more of curved part boundaries into thick layers, at the price of rougher boundary walls: deviations up to this fraction of the nozzle diameter are swallowed by the thick extrusions."
+msgstr "Đường viền của bộ phận được gán cho đầu đùn có chiều cao lớp ưu tiên dày hơn có thể lệch ngang bao xa qua các lớp của một chuỗi dày mà vẫn được gộp, tính theo phần trăm đường kính đầu phun của đầu đùn đó. Giá trị cao hơn gộp nhiều ranh giới cong hơn vào các lớp dày, đổi lại thành ranh giới thô hơn: sai lệch tới phần này của đường kính đầu phun bị các đường đùn dày nuốt mất."
+
+msgid "Increase"
+msgstr "Tăng"
+
+#, no-c-format, no-boost-format
+msgid "Layer height this extruder should print with, used for printers whose extruders have different nozzle sizes. It must be an integer multiple of the object layer height. A part whose features all follow this extruder prints only on every Nth layer with correspondingly thicker extrusions, wherever its geometry allows it; elsewhere it falls back to the object layer height. When the rest of the part cannot follow, walls assigned to this extruder still combine to this height on their own, full-density top surfaces absorb the solid layers below them, and sparse or 100% dense infill combines to this height independently. 0 means to use the object layer height."
+msgstr "Chiều cao lớp mà đầu đùn này nên in, dành cho máy in có các đầu đùn với kích thước đầu phun khác nhau. Phải là bội số nguyên của chiều cao lớp vật thể. Bộ phận có mọi đặc điểm đều theo đầu đùn này chỉ in ở mỗi lớp thứ N với đường đùn dày tương ứng, ở nơi hình học cho phép; nơi khác quay về chiều cao lớp vật thể. Khi phần còn lại của bộ phận không theo được, các thành gán cho đầu đùn này vẫn tự gộp đến chiều cao này, bề mặt trên đặc hoàn toàn hấp thụ các lớp đặc bên dưới, và phần điền thưa hoặc đặc 100% gộp đến chiều cao này một cách độc lập. 0 nghĩa là dùng chiều cao lớp vật thể."
+
+msgid "Layer height this extruder should print with: an integer multiple of the object layer height within this extruder's layer height limits. Default keeps the object layer height."
+msgstr "Chiều cao lớp mà đầu đùn này nên in: bội số nguyên của chiều cao lớp vật thể trong giới hạn chiều cao lớp của đầu đùn này. Mặc định giữ chiều cao lớp vật thể."
+
+msgid "No extruder has a nozzle matching the support nozzle diameter."
+msgstr "Không có đầu đùn nào có đầu phun khớp với đường kính đầu phun của phần đỡ."
+
+msgid "No loaded filament matches the support/raft base material (and the support nozzle diameter)."
+msgstr "Không có sợi nhựa nào đã nạp khớp với vật liệu đế đỡ/bè (và đường kính đầu phun của phần đỡ)."
+
+msgid "No loaded filament matches the support/raft interface material (and the support nozzle diameter)."
+msgstr "Không có sợi nhựa nào đã nạp khớp với vật liệu bề mặt tiếp xúc của phần đỡ/bè (và đường kính đầu phun của phần đỡ)."
+
+#, no-c-format, boost-format
+msgid "Nozzle %1%: layer height limits set to %2%-%3% mm, from \"%4%\"."
+msgstr "Đầu phun %1%: giới hạn chiều cao lớp được đặt thành %2%-%3% mm, từ \"%4%\"."
+
+msgid "On printers mapping multiple filaments to an extruder, different layer heights per extruder require a manual filament-to-extruder mapping. Set the filament map mode to manual or use the same layer height for all extruders."
+msgstr "Trên máy in gán nhiều sợi nhựa cho một đầu đùn, chiều cao lớp khác nhau cho từng đầu đùn cần gán sợi nhựa với đầu đùn thủ công. Đặt chế độ gán sợi nhựa thành thủ công hoặc dùng cùng chiều cao lớp cho mọi đầu đùn."
+
+msgid "On printers whose extruders have different nozzle diameters, only filaments of this nozzle diameter are used to print support, raft and support interface. This keeps filaments of other nozzle sizes - with their different line widths and layer height limits - out of the support. Support filaments set to a non-default value must match this diameter. Value 0 allows any filament to print support."
+msgstr "Trên máy in có các đầu đùn với đường kính đầu phun khác nhau, chỉ sợi nhựa của đường kính đầu phun này được dùng để in phần đỡ, bè và bề mặt tiếp xúc của phần đỡ. Điều này giữ sợi nhựa của các cỡ đầu phun khác - với độ rộng đường và giới hạn chiều cao lớp khác - khỏi phần đỡ. Sợi nhựa phần đỡ đặt giá trị khác mặc định phải khớp đường kính này. Giá trị 0 cho phép mọi sợi nhựa in phần đỡ."
+
+msgid "Outer and inner walls automatically print at their own preferred layer heights when one height is an integer multiple of the other. When the heights do not divide evenly, this option adjusts the wall layer height of one of the two wall filaments (chosen below) to the nearest multiple or divisor of the other, so the walls can still split. The adjusted height only applies to that filament's walls; other features keep the preferred layer height. Adjustments never leave the filament's layer height limits: if no allowed height exists in the chosen direction, the walls print together at the lower height as usual."
+msgstr "Thành ngoài và thành trong tự động in ở chiều cao lớp ưu tiên riêng khi một chiều cao là bội số nguyên của chiều cao kia. Khi hai chiều cao không chia hết cho nhau, tùy chọn này điều chỉnh chiều cao lớp thành của một trong hai sợi nhựa thành (chọn bên dưới) về bội số hoặc ước số gần nhất của chiều cao kia, để các thành vẫn tách được. Chiều cao điều chỉnh chỉ áp dụng cho thành của sợi nhựa đó; các đặc điểm khác giữ chiều cao lớp ưu tiên. Điều chỉnh không bao giờ vượt giới hạn chiều cao lớp của sợi nhựa: nếu không có chiều cao hợp lệ theo hướng đã chọn, các thành in cùng nhau ở chiều cao thấp hơn như thường lệ."
+
+msgid "Per-extruder layer heights are not supported in spiral vase mode."
+msgstr "Chiều cao lớp theo từng đầu đùn không được hỗ trợ trong chế độ bình xoắn ốc."
+
+msgid "Per-extruder layer heights are not supported together with interface shells."
+msgstr "Chiều cao lớp theo từng đầu đùn không được hỗ trợ cùng với vỏ tiếp xúc."
+
+msgid "Per-extruder layer heights are not supported together with variable layer height."
+msgstr "Chiều cao lớp theo từng đầu đùn không được hỗ trợ cùng với chiều cao lớp thay đổi."
+
+msgid "Preferred layer height"
+msgstr "Chiều cao lớp ưu tiên"
+
+msgid "Print the support and raft base only with filaments of this material type; extruders loaded with other types are not used for it. Combines with the support nozzle diameter restriction. Leave empty for no restriction; an explicitly selected support/raft base filament still takes precedence."
+msgstr "Chỉ in phần đỡ và đế bè bằng sợi nhựa thuộc loại vật liệu này; đầu đùn nạp loại khác không được dùng cho việc đó. Kết hợp với giới hạn đường kính đầu phun của phần đỡ. Để trống nếu không giới hạn; sợi nhựa đế đỡ/bè được chọn rõ ràng vẫn được ưu tiên."
+
+msgid "Print the support and raft interface only with filaments of this material type; extruders loaded with other types are not used for it. Combines with the support nozzle diameter restriction. Leave empty for no restriction; an explicitly selected support/raft interface filament still takes precedence."
+msgstr "Chỉ in bề mặt tiếp xúc của phần đỡ và bè bằng sợi nhựa thuộc loại vật liệu này; đầu đùn nạp loại khác không được dùng cho việc đó. Kết hợp với giới hạn đường kính đầu phun của phần đỡ. Để trống nếu không giới hạn; sợi nhựa bề mặt tiếp xúc được chọn rõ ràng vẫn được ưu tiên."
+
+msgid "Raft and support base"
+msgstr "Bè và đế đỡ"
+
+msgid "Show legacy filament selection"
+msgstr "Hiện lựa chọn sợi nhựa kiểu cũ"
+
+#, no-c-format, boost-format
+msgid "Some object parts prefer %1% mm layers, but the nozzle of filament %2% printing other features of the part is too small to extrude that height. These parts print with the object layer height instead."
+msgstr "Một số bộ phận ưu tiên lớp %1% mm, nhưng đầu phun của sợi nhựa %2% in các đặc điểm khác của bộ phận quá nhỏ để đùn chiều cao đó. Các bộ phận này in bằng chiều cao lớp vật thể thay thế."
+
+#, no-c-format, boost-format
+msgid "Some object parts prefer %1% mm layers, but the nozzle of wall filament %2% is too small to extrude that height. Outer and inner walls print together, so these walls keep the object layer height. Assign both wall features to filaments with large enough nozzles."
+msgstr "Một số bộ phận ưu tiên lớp %1% mm, nhưng đầu phun của sợi nhựa thành %2% quá nhỏ để đùn chiều cao đó. Thành ngoài và thành trong in cùng nhau, nên các thành này giữ chiều cao lớp vật thể. Hãy gán cả hai loại thành cho sợi nhựa có đầu phun đủ lớn."
+
+#, no-c-format, boost-format
+msgid "Some object parts print %1% mm layers with filament %2% whose maximum layer height is %3% mm. Assign the part's features to filaments of the coarser nozzle, raise the filament's maximum layer height, or accept printing above it."
+msgstr "Một số bộ phận in lớp %1% mm bằng sợi nhựa %2% có chiều cao lớp tối đa %3% mm. Hãy gán các đặc điểm của bộ phận cho sợi nhựa của đầu phun thô hơn, tăng chiều cao lớp tối đa của sợi nhựa, hoặc chấp nhận in vượt mức."
+
+#, no-c-format, boost-format
+msgid "Some object parts print %1% mm layers with filament %2% whose minimum layer height is %3% mm. Raise the object layer height, use a filament with a finer nozzle for these features, or accept printing below the extruder's minimum."
+msgstr "Một số bộ phận in lớp %1% mm bằng sợi nhựa %2% có chiều cao lớp tối thiểu %3% mm. Hãy tăng chiều cao lớp vật thể, dùng sợi nhựa có đầu phun mịn hơn cho các đặc điểm này, hoặc chấp nhận in dưới mức tối thiểu của đầu đùn."
+
+msgid "Some object parts use filaments whose preferred layer heights cannot all be honored: a part prints its features with one layer pitch (set by its wall filaments, or by the other features' agreement when no wall filament has a preference); the walls, the top surfaces and the infill can each combine to their own height when the rest of the part cannot follow them, but the remaining features print with the part's pitch."
+msgstr "Một số bộ phận dùng sợi nhựa có chiều cao lớp ưu tiên không thể đáp ứng hết: bộ phận in các đặc điểm với một bước lớp duy nhất (do sợi nhựa thành quyết định, hoặc do các đặc điểm còn lại thống nhất khi không sợi nhựa thành nào có ưu tiên); thành, bề mặt trên và phần điền có thể tự gộp đến chiều cao riêng khi phần còn lại của bộ phận không theo được, nhưng các đặc điểm còn lại in theo bước của bộ phận."
+
+msgid "Support for mixed nozzle sizes"
+msgstr "Phần đỡ cho các cỡ đầu phun hỗn hợp"
+
+msgid "Support may print with extruders of differing nozzle diameters. Set the support nozzle diameter (or explicit support and interface filaments) to keep the support on one nozzle size."
+msgstr "Phần đỡ có thể in bằng các đầu đùn có đường kính đầu phun khác nhau. Hãy đặt đường kính đầu phun của phần đỡ (hoặc chọn rõ sợi nhựa phần đỡ và bề mặt tiếp xúc) để giữ phần đỡ ở một cỡ đầu phun."
+
+msgid "Support nozzle diameter"
+msgstr "Đường kính đầu phun của phần đỡ"
+
+msgid "Support nozzle size"
+msgstr "Cỡ đầu phun của phần đỡ"
+
+msgid "Support/raft base material"
+msgstr "Vật liệu đế đỡ/bè"
+
+msgid "Support/raft interface material"
+msgstr "Vật liệu bề mặt tiếp xúc của phần đỡ/bè"
+
+#, no-c-format, boost-format
+msgid "The %1% mm infill line width is too small for infill combined to %2% mm high layers. Increase the line width or lower the preferred layer height of the infill filament."
+msgstr "Độ rộng đường điền %1% mm quá nhỏ cho phần điền gộp thành lớp cao %2% mm. Hãy tăng độ rộng đường hoặc giảm chiều cao lớp ưu tiên của sợi nhựa điền."
+
+#, no-c-format, boost-format
+msgid "The %1% mm line width is too small for the %2% mm layer height of its extruder. Increase the line width or lower the extruder layer height."
+msgstr "Độ rộng đường %1% mm quá nhỏ cho chiều cao lớp %2% mm của đầu đùn đó. Hãy tăng độ rộng đường hoặc giảm chiều cao lớp đầu đùn."
+
+#, no-c-format, boost-format
+msgid "The layer height of extruder %1% (%2% mm) cannot exceed its nozzle diameter."
+msgstr "Chiều cao lớp của đầu đùn %1% (%2% mm) không được vượt đường kính đầu phun của nó."
+
+#, no-c-format, boost-format
+msgid "The layer height of extruder %1% (%2% mm) is ignored for some object parts: it must be an integer multiple of the object layer height (%3% mm), not below it, and must not exceed the extruder's nozzle diameter."
+msgstr "Chiều cao lớp của đầu đùn %1% (%2% mm) bị bỏ qua cho một số bộ phận: nó phải là bội số nguyên của chiều cao lớp vật thể (%3% mm), không thấp hơn, và không vượt đường kính đầu phun của đầu đùn."
+
+#, no-c-format, boost-format
+msgid "The layer height of extruder %1% (%2% mm) is smaller than the object layer height (%3% mm). Lower the object layer height to the finest extruder layer height."
+msgstr "Chiều cao lớp của đầu đùn %1% (%2% mm) nhỏ hơn chiều cao lớp vật thể (%3% mm). Hãy hạ chiều cao lớp vật thể xuống chiều cao lớp đầu đùn mịn nhất."
+
+#, no-c-format, boost-format
+msgid "The layer height of extruder %1% (%2% mm) must be an integer multiple of the object layer height (%3% mm)."
+msgstr "Chiều cao lớp của đầu đùn %1% (%2% mm) phải là bội số nguyên của chiều cao lớp vật thể (%3% mm)."
+
+msgid "The lowest printable layer height for the extruder. Used to limit the minimum layer height when enable adaptive layer height. Parts printed with a thicker preferred extruder layer height never fall back below this height either (the first layer excepted)."
+msgstr "Chiều cao lớp thấp nhất mà đầu đùn in được. Dùng để giới hạn chiều cao lớp tối thiểu khi bật chiều cao lớp thích ứng. Các bộ phận in với chiều cao lớp đầu đùn ưu tiên dày hơn cũng không bao giờ xuống dưới chiều cao này (trừ lớp đầu tiên)."
+
+#, no-c-format, boost-format
+msgid "The preferred layer height of nozzle %1% no longer fits through it and was reset to Default."
+msgstr "Chiều cao lớp ưu tiên của đầu phun %1% không còn lọt qua nó và đã được đặt lại về Mặc định."
+
+msgid "The support/raft base filament is not of the support/raft base material."
+msgstr "Sợi nhựa đế đỡ/bè không thuộc vật liệu đế đỡ/bè."
+
+msgid "The support/raft base filament prints with a nozzle that does not match the support nozzle diameter."
+msgstr "Sợi nhựa đế đỡ/bè in bằng đầu phun không khớp đường kính đầu phun của phần đỡ."
+
+msgid "The support/raft interface filament is not of the support/raft interface material."
+msgstr "Sợi nhựa bề mặt tiếp xúc của phần đỡ/bè không thuộc vật liệu bề mặt tiếp xúc của phần đỡ/bè."
+
+msgid "The support/raft interface filament prints with a nozzle that does not match the support nozzle diameter."
+msgstr "Sợi nhựa bề mặt tiếp xúc của phần đỡ/bè in bằng đầu phun không khớp đường kính đầu phun của phần đỡ."
+
+msgid "The wall filaments of some object parts prefer different layer heights. Outer and inner walls print together, so these walls keep the object layer height. Assign both wall features to filaments preferring the same height to print thicker walls."
+msgstr "Sợi nhựa thành của một số bộ phận ưu tiên chiều cao lớp khác nhau. Thành ngoài và thành trong in cùng nhau, nên các thành này giữ chiều cao lớp vật thể. Để in thành dày hơn, hãy gán cả hai loại thành cho sợi nhựa ưu tiên cùng chiều cao."
+
+#, no-c-format, boost-format
+msgid "The wall filaments of some object parts prefer different layer heights. Outer and inner walls print together, so these walls print with the lower height (%1% mm)."
+msgstr "Sợi nhựa thành của một số bộ phận ưu tiên chiều cao lớp khác nhau. Thành ngoài và thành trong in cùng nhau, nên các thành này in ở chiều cao thấp hơn (%1% mm)."
+
+#, no-c-format, boost-format
+msgid "The wall layer height of filament %1% was adjusted from the preferred %2% mm to %3% mm so the outer and inner walls can print at compatible layer heights (\"Adjust wall layer height\"). Only this filament's walls print the adjusted height; its other features keep the preferred one."
+msgstr "Chiều cao lớp thành của sợi nhựa %1% đã được điều chỉnh từ %2% mm ưu tiên thành %3% mm để thành ngoài và thành trong in được ở chiều cao lớp tương thích (\"Điều chỉnh chiều cao lớp của thành\"). Chỉ thành của sợi nhựa này in chiều cao điều chỉnh; các đặc điểm khác giữ chiều cao ưu tiên."
+
+msgid "Thick layer regions"
+msgstr "Vùng lớp dày"
+
+msgid "Thick layer tolerance"
+msgstr "Dung sai lớp dày"
+
+#, no-c-format, boost-format
+msgid "This printer has no profile for a %1% mm nozzle. Please review the layer height limits of nozzle %2% in the printer settings."
+msgstr "Máy in này không có hồ sơ cho đầu phun %1% mm. Vui lòng kiểm tra giới hạn chiều cao lớp của đầu phun %2% trong cài đặt máy in."
+
+msgid "This printer uses different nozzle sizes. Select the nozzle size that prints the support, and the filament types used for the raft and the support interface."
+msgstr "Máy in này dùng các cỡ đầu phun khác nhau. Hãy chọn cỡ đầu phun in phần đỡ, và các loại sợi nhựa dùng cho bè và bề mặt tiếp xúc của phần đỡ."
+
+msgid "Whether the adjusted wall filament's wall layer height is decreased or increased to reach a height compatible with the other wall filament. Heights outside the adjusted filament's layer height limits are never used: if no allowed height exists in this direction, the walls print together at the lower height as usual."
+msgstr "Chiều cao lớp thành của sợi nhựa thành được điều chỉnh sẽ giảm hay tăng để đạt chiều cao tương thích với sợi nhựa thành kia. Không bao giờ dùng chiều cao ngoài giới hạn chiều cao lớp của sợi nhựa được điều chỉnh: nếu không có chiều cao hợp lệ theo hướng này, các thành in cùng nhau ở chiều cao thấp hơn như thường lệ."
+
+msgid "Which of the two wall filaments gets its wall layer height adjusted when the preferred layer heights do not divide evenly."
+msgstr "Sợi nhựa thành nào trong hai sợi được điều chỉnh chiều cao lớp thành khi các chiều cao lớp ưu tiên không chia hết cho nhau."
