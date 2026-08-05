@@ -1116,6 +1116,8 @@ static std::vector<std::string> s_Preset_print_options{
     "bottom_surface_filament_id",
     "support_filament",
     "support_nozzle_diameter",
+    "support_base_material",
+    "support_interface_material",
     "support_interface_filament",
     "support_interface_not_for_body",
     "ooze_prevention",
