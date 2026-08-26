@@ -21,7 +21,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/MultiNozzleUtils.hpp"
 #include "slic3r/GUI/DeviceCore/DevNozzleRack.h"
-#include "slic3r/GUI/DeviceTab/wgtDeviceNozzleRackNozzleItem.h"
+#include "slic3r/GUI/DeviceTab/wgtDeviceNozzleRack.h"
 
 #include <wx/panel.h>
 #include <wx/webview.h>
@@ -167,7 +167,7 @@ class MultiNozzleSyncDialog : public DPIDialog
 {
 public:
     MultiNozzleSyncDialog(wxWindow* parent, std::weak_ptr<DevNozzleRack> rack);
-    virtual void on_dpi_changed(const wxRect& suggested_rect) {};
+    virtual void on_dpi_changed(const wxRect& suggested_rect) override {};
     std::vector<NozzleOption> GetNozzleOptions(const std::vector<MultiNozzleUtils::NozzleGroupInfo>& group_infos);
 
     std::optional<NozzleOption> GetSelectedOption() {

@@ -367,6 +367,9 @@ include(libnoise/libnoise.cmake)
 
 include(Draco/Draco.cmake)
 
+# Assimp: glTF/GLB/FBX import for the texture-to-color feature.
+include(Assimp/Assimp.cmake)
+
 
 # I *think* 1.1 is used for *just* md5 hashing?
 # 3.1 has everything in the right place, but the md5 funcs used are deprecated
@@ -422,6 +425,8 @@ endif ()
 
 include(OCCT/OCCT.cmake)
 include(OpenCV/OpenCV.cmake)
+include(python3/python3.cmake)
+include(wxInspector/wxInspector.cmake)
 
 set(_dep_list
     dep_Boost
@@ -444,6 +449,9 @@ set(_dep_list
     ${ZLIB_PKG}
     ${EXPAT_PKG}
     dep_libnoise
+    dep_python3
+    dep_wxInspector
+    dep_Assimp
     )
 
 if (MSVC)
