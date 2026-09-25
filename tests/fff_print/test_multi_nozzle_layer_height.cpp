@@ -13,7 +13,7 @@
 #include "libslic3r/GCode/ToolOrdering.hpp"
 #include <libslic3r/ModelArrange.hpp>
 
-#include "test_data.hpp"
+#include "test_helpers.hpp"
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
@@ -103,11 +103,11 @@ static DynamicPrintConfig two_extruder_config(double second_extruder_layer_heigh
 // One object made of two 20x20 mm parts side by side; the second part prints with filament 2.
 // The parts are z-scaled by z_scale (cubes are 10 mm tall by default).
 static void init_two_part_print(Print &print, Model &model, const DynamicPrintConfig &config, float z_scale = 0.5f,
-                                TestMesh coarse_shape = TestMesh::cube_20x20x20)
+                                const TriangleMesh &coarse_shape = cube(20))
 {
-    TriangleMesh fine_mesh = mesh(TestMesh::cube_20x20x20);
+    TriangleMesh fine_mesh = cube(20);
     fine_mesh.scale(Vec3f(1.f, 1.f, z_scale));
-    TriangleMesh coarse_mesh = mesh(coarse_shape);
+    TriangleMesh coarse_mesh = coarse_shape;
     coarse_mesh.scale(Vec3f(1.f, 1.f, z_scale));
     coarse_mesh.translate(30.f, 0.f, 0.f);
 
@@ -253,7 +253,7 @@ SCENARIO("Fixed mode always prints the extruder layer height", "[MultiNozzleLaye
         WHEN("thick layer regions are Consistent") {
             Print print;
             Model model;
-            init_two_part_print(print, model, config, 0.25f, TestMesh::pyramid);
+            init_two_part_print(print, model, config, 0.25f, mesh(TestMesh::pyramid));
             THEN("the drift keeps the coarse part at the object layer height") {
                 REQUIRE(print.validate().string.empty());
                 size_t at_pitch, at_base, odd_layers;
@@ -267,7 +267,7 @@ SCENARIO("Fixed mode always prints the extruder layer height", "[MultiNozzleLaye
             config.option<ConfigOptionEnum<ExtruderLayerHeightMode>>("extruder_layer_height_mode", true)->value = elhmFixed;
             Print print;
             Model model;
-            init_two_part_print(print, model, config, 0.25f, TestMesh::pyramid);
+            init_two_part_print(print, model, config, 0.25f, mesh(TestMesh::pyramid));
             THEN("every coarse extrusion above the first layer keeps the extruder layer height") {
                 REQUIRE(print.validate().string.empty());
                 size_t at_pitch, at_base, odd_layers;
@@ -290,9 +290,9 @@ SCENARIO("Fixed mode keeps top surfaces on combined steps", "[MultiNozzleLayerHe
             config.option<ConfigOptionEnum<ExtruderLayerHeightMode>>("extruder_layer_height_mode", true)->value = mode;
             Print print;
             Model model;
-            TriangleMesh base = mesh(TestMesh::cube_20x20x20);
+            TriangleMesh base = cube(20);
             base.scale(Vec3f(1.f, 1.f, 0.25f));                  // 5 mm tall: the shoulder ends mid-run
-            TriangleMesh boss = mesh(TestMesh::cube_20x20x20);
+            TriangleMesh boss = cube(20);
             boss.scale(Vec3f(0.5f, 0.5f, 0.1f));                 // 10 x 10 x 2 mm on top
             boss.translate(5.f, 5.f, 5.f);
             ModelObject *object = model.add_object();
@@ -336,7 +336,7 @@ SCENARIO("Fixed mode bridges lids that start inside a run", "[MultiNozzleLayerHe
         Model model;
         TriangleMesh tube = mesh(TestMesh::cube_with_hole);   // 20 x 20 x 10 mm, 10 mm hole through z
         tube.scale(Vec3f(1.f, 1.f, 0.5f));                    // 5 mm tall: the lid starts mid-run
-        TriangleMesh lid = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh lid = cube(20);
         lid.scale(Vec3f(1.f, 1.f, 0.1f));
         lid.translate(0.f, 0.f, 5.f);
         ModelObject *object = model.add_object();
@@ -377,13 +377,13 @@ SCENARIO("A bottom over another region's combined-away geometry bridges", "[Mult
         Model model;
         // One coarse volume: a full slab plus a one-layer pocket rim on top. The run pairing the
         // slab's top layer with the rim commits only the rim and drops the pocket footprint.
-        TriangleMesh slab = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh slab = cube(20);
         slab.scale(Vec3f(1.f, 1.f, 0.07f));                  // 20 x 20 x 1.4 mm
         TriangleMesh rim = mesh(TestMesh::cube_with_hole);   // 20 x 20, 10 mm hole
         rim.scale(Vec3f(1.f, 1.f, 0.02f));                   // one 0.2 mm layer
         rim.translate(0.f, 0.f, 1.4f);
         slab.merge(rim);
-        TriangleMesh insert = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh insert = cube(20);
         insert.scale(Vec3f(0.4f, 0.4f, 0.04f));              // 8 x 8 x 0.8 mm in the pocket
         insert.translate(6.f, 6.f, 1.4f);
         ModelObject *object = model.add_object();
@@ -430,19 +430,19 @@ SCENARIO("A floating insert below its covering run is filled by the run and resu
         // above it. The run pairs the slab with the rim and drops the slab's pocket footprint.
         TriangleMesh roof = mesh(TestMesh::cube_with_hole);   // 20 x 20, 10 mm hole
         roof.scale(Vec3f(1.f, 1.f, 0.1f));                    // 1 mm tall tube
-        TriangleMesh slab = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh slab = cube(20);
         slab.scale(Vec3f(1.f, 1.f, 0.01f));                   // 20 x 20 x 0.2 mm
         slab.translate(0.f, 0.f, 1.f);
         roof.merge(slab);
         const float rim_dims[4][4] = {{0.3f, 1.f, 0.f, 0.f}, {0.3f, 1.f, 14.f, 0.f},
                                       {0.4f, 0.3f, 6.f, 0.f}, {0.4f, 0.3f, 6.f, 14.f}};
         for (const auto &d : rim_dims) {
-            TriangleMesh rim = mesh(TestMesh::cube_20x20x20);
+            TriangleMesh rim = cube(20);
             rim.scale(Vec3f(d[0], d[1], 0.02f));              // rim pieces around an 8 x 8 pocket
             rim.translate(d[2], d[3], 1.2f);
             roof.merge(rim);
         }
-        TriangleMesh insert = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh insert = cube(20);
         insert.scale(Vec3f(0.4f, 0.4f, 0.04f));               // 8 x 8 x 0.8 mm in the pocket
         insert.translate(6.f, 6.f, 1.2f);
         ModelObject *object = model.add_object();
@@ -771,7 +771,7 @@ SCENARIO("Combined infill is limited by the printing nozzle only", "[MultiNozzle
         Model model;
         // A single part: filament 2 prints only infill (the derived 0.6 mm feature pitch is vetoed
         // by the walls' physical 0.4 mm nozzle, so the part itself stays at the object layer height).
-        TriangleMesh cube = mesh(TestMesh::cube_20x20x20);
+        TriangleMesh cube = Test::cube(20);
         cube.scale(Vec3f(1.f, 1.f, 0.5f));
         ModelObject *object_model = model.add_object();
         object_model->name = "single_cube";
@@ -1151,7 +1151,7 @@ static DynamicPrintConfig four_nozzle_config()
 // One 20x20x10 mm cube.
 static void init_cube_print(Print &print, Model &model, const DynamicPrintConfig &config)
 {
-    TriangleMesh cube = mesh(TestMesh::cube_20x20x20);
+    TriangleMesh cube = Test::cube(20);
     cube.scale(Vec3f(1.f, 1.f, 0.5f));
     ModelObject *object = model.add_object();
     object->name = "cube";
