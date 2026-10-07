@@ -296,11 +296,7 @@
 #include "DeviceCore/DevConfigUtil.h"
 #include "DeviceCore/DevDefs.h"
 
-using boost::optional;
 namespace fs = boost::filesystem;
-using Slic3r::_3DScene;
-using Slic3r::Preset;
-using Slic3r::GUI::format_wxstr;
 using namespace nlohmann;
 
 static const std::pair<unsigned int, unsigned int> THUMBNAIL_SIZE_3MF = { 512, 512 };
@@ -361,7 +357,7 @@ wxDEFINE_EVENT(EVT_NOTICE_FULL_SCREEN_CHANGED, IntEvent);
 #define PRINTER_PANEL_RADIUS (6) // ORCA
 #define BTN_SYNC_SIZE (wxSize(FromDIP(96), FromDIP(98)))
 
-static string get_diameter_string(float diameter)
+static std::string get_diameter_string(float diameter)
 {
     std::ostringstream stream; // ORCA ensure 0.25 returned as 0.25. previous code returned as 0.2 because of std::setprecision(1)
     stream << std::fixed << std::setprecision(2) << diameter;  // Use 2 decimals to capture 0.25 / 0.15 reliably
@@ -3000,6 +2996,7 @@ Sidebar::Sidebar(Plater *parent)
         });
 
         // "Variant", not "Nozzle": picking one switches the printer preset (see panel_nozzle_dia).
+        // TRN Sidebar label of the printer variant (nozzle) selector; picking one switches the printer preset.
         p->label_nozzle_title = new Label(p->panel_nozzle_dia, _L("Variant"), LB_PROPAGATE_MOUSE_EVENT);
         p->label_nozzle_title->SetFont(Label::Body_10);
 
@@ -3032,7 +3029,7 @@ Sidebar::Sidebar(Plater *parent)
         p->combo_nozzle_dia->Bind(wxEVT_SET_FOCUS,  [nozzle_focus_bg](auto& e) {nozzle_focus_bg(true ); e.Skip();});
         p->combo_nozzle_dia->Bind(wxEVT_KILL_FOCUS, [nozzle_focus_bg](auto& e) {nozzle_focus_bg(false); e.Skip();});
 
-        p->label_nozzle_type = new Label(p->panel_nozzle_dia, "Brass", LB_PROPAGATE_MOUSE_EVENT | wxST_ELLIPSIZE_END | wxALIGN_CENTRE_HORIZONTAL);
+        p->label_nozzle_type = new Label(p->panel_nozzle_dia, _L("Brass"), LB_PROPAGATE_MOUSE_EVENT | wxST_ELLIPSIZE_END | wxALIGN_CENTRE_HORIZONTAL);
         p->label_nozzle_type->SetFont(Label::Body_10);
         p->label_nozzle_type->SetMinSize(FromDIP(wxSize(56, -1)));
         p->label_nozzle_type->SetMaxSize(FromDIP(wxSize(56, -1)));
@@ -6326,7 +6323,7 @@ void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
     }
 
     // BBS:Record consumables information before synchronization
-    std::vector<string> color_before_sync;
+    std::vector<std::string> color_before_sync;
     std::vector<bool>   is_support_before;
     DynamicPrintConfig& project_config = wxGetApp().preset_bundle->project_config;
     ConfigOptionStrings* color_opt = project_config.option<ConfigOptionStrings>("filament_colour");
@@ -8110,13 +8107,13 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_TAB, [this](SimpleEvent&) { select_next_view_3D(); });
         preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_COLLAPSE_SIDEBAR, [this](SimpleEvent&) { this->q->collapse_sidebar(!this->q->is_sidebar_collapsed());  });
         preview->get_wxglcanvas()->Bind(EVT_CUSTOMEVT_TICKSCHANGED, [this](wxCommandEvent& event) {
-            Type tick_event_type = (Type)event.GetInt();
+            CustomGCode::Type tick_event_type = (CustomGCode::Type)event.GetInt();
             Model& model = wxGetApp().plater()->model();
             //BBS: replace model custom gcode with current plate custom gcode
             model.plates_custom_gcodes[model.curr_plate_index] = preview->get_canvas3d()->get_gcode_viewer().get_layers_slider()->GetTicksValues();
 
             // BBS set to invalid state only
-            if (tick_event_type == Type::ToolChange || tick_event_type == Type::Custom || tick_event_type == Type::Template || tick_event_type == Type::PausePrint) {
+            if (tick_event_type == CustomGCode::Type::ToolChange || tick_event_type == CustomGCode::Type::Custom || tick_event_type == CustomGCode::Type::Template || tick_event_type == CustomGCode::Type::PausePrint) {
                 PartPlate *plate = this->q->get_partplate_list().get_curr_plate();
                 if (plate) {
                     plate->update_slice_result_valid_state(false);
@@ -12765,7 +12762,7 @@ void Plater::priv::on_select_preset(wxCommandEvent &evt)
     Vec3d old_plate_pos = old_plate->get_center_origin();
 
     // BBS: Save the model in the current platelist
-    std::vector<vector<int> > plate_object;
+    std::vector<std::vector<int> > plate_object;
     for (size_t i = 0; i < old_plate_list.get_plate_count(); ++i) {
         PartPlate* plate = old_plate_list.get_plate(i);
         std::vector<int> obj_idxs;
@@ -16322,7 +16319,7 @@ bool Plater::add_model(bool imperial_units, std::string fname)
 
 void Plater::calib_pa(const Calib_Params& params)
 {
-    const auto calib_pa_name = wxString::Format(L"Pressure Advance Test");
+    const auto calib_pa_name = _L("Pressure Advance Test");
     new_project(false, false, calib_pa_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     auto print_config = &wxGetApp().preset_bundle->prints.get_edited_preset().config;
@@ -16799,11 +16796,9 @@ void Plater::calib_flowrate(bool is_linear, int pass, InfillPattern pattern) {
         return;
     wxString calib_name;
     if (is_linear) {
-        calib_name = L"Orca YOLO Flow Calibration";
-        if (pass == 2)
-            calib_name += L" - Perfectionist version";
+        calib_name = pass == 2 ? _L("Orca YOLO Flow Calibration - Perfectionist version") : _L("Orca YOLO Flow Calibration");
     } else
-        calib_name = wxString::Format(L"Flowrate Test - Pass%d", pass);
+        calib_name = wxString::Format(_L("Flowrate Test - Pass%d"), pass);
 
     if (new_project(false, false, calib_name) == wxID_CANCEL)
         return;
@@ -16843,7 +16838,7 @@ void Plater::calib_temp(const Calib_Params& params) {
     constexpr double base_temp_tower_block_height = 10.0;
     constexpr int base_temp_tower_temp_step = 5;
 
-    const auto calib_temp_name = wxString::Format(L"Nozzle temperature test");
+    const auto calib_temp_name = _L("Nozzle temperature test");
     new_project(false, false, calib_temp_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Temp_Tower) return;
@@ -16923,7 +16918,7 @@ void Plater::calib_temp(const Calib_Params& params) {
 
 void Plater::calib_max_vol_speed(const Calib_Params& params)
 {
-    const auto calib_vol_speed_name = wxString::Format(L"Max volumetric speed test");
+    const auto calib_vol_speed_name = _L("Max volumetric speed test");
     new_project(false, false, calib_vol_speed_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Vol_speed_Tower)
@@ -17002,7 +16997,7 @@ void Plater::calib_max_vol_speed(const Calib_Params& params)
 
 void Plater::calib_retraction(const Calib_Params& params)
 {
-    const auto calib_retraction_name = wxString::Format(L"Retraction");
+    const auto calib_retraction_name = _L("Retraction");
     new_project(false, false, calib_retraction_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Retraction_tower)
@@ -17064,7 +17059,7 @@ void Plater::calib_retraction(const Calib_Params& params)
 
 void Plater::calib_VFA(const Calib_Params& params)
 {
-    const auto calib_vfa_name = wxString::Format(L"VFA test");
+    const auto calib_vfa_name = _L("VFA test");
     new_project(false, false, calib_vfa_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_VFA_Tower)
@@ -17147,7 +17142,7 @@ void Plater::calib_VFA(const Calib_Params& params)
 
 void Plater::calib_input_shaping_freq(const Calib_Params& params)
 {
-    const auto calib_input_shaping_name = wxString::Format(L"Input shaping Frequency test");
+    const auto calib_input_shaping_name = _L("Input shaping Frequency test");
     new_project(false, false, calib_input_shaping_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Input_shaping_freq)
@@ -17209,7 +17204,7 @@ void Plater::calib_input_shaping_freq(const Calib_Params& params)
 
 void Plater::calib_input_shaping_damp(const Calib_Params& params)
 {
-    const auto calib_input_shaping_name = wxString::Format(L"Input shaping Damping test");
+    const auto calib_input_shaping_name = _L("Input shaping Damping test");
     new_project(false, false, calib_input_shaping_name);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Input_shaping_damp)
@@ -17270,7 +17265,7 @@ void Plater::calib_input_shaping_damp(const Calib_Params& params)
 
 void Plater::Calib_Cornering(const Calib_Params& params)
 {
-    const auto Calib_Cornering = wxString::Format(L"Cornering test");
+    const auto Calib_Cornering = _L("Cornering test");
     new_project(false, false, Calib_Cornering);
     wxGetApp().mainframe->select_tab(TAB_ID_PREPARE);
     if (params.mode != CalibMode::Calib_Cornering)
@@ -17458,7 +17453,7 @@ void Plater::load_gcode(const wxString& filename)
     if (p->preview->get_canvas3d()->get_gcode_layers_zs().empty()) {
         MessageDialog(this, _L("The selected file") + ":\n" + filename + "\n" + _L("Does not contain valid G-code."),
             wxString(GCODEVIEWER_APP_NAME) + " - " + _L("An Error has occurred while loading the G-code file."), wxCLOSE | wxICON_WARNING | wxCENTRE).ShowModal();
-        set_project_filename(DEFAULT_PROJECT_NAME);
+        set_project_filename(_L(DEFAULT_PROJECT_NAME));
     } else {
         set_project_filename(filename);
     }
@@ -17809,7 +17804,7 @@ ProjectDropDialog::ProjectDropDialog(const std::string &filename)
     // Orca: hide the "Don't show again" checkbox, people keeps accidentally checked this then forgot
     // wxBoxSizer *m_sizer_left = new wxBoxSizer(wxHORIZONTAL);
     //
-    // auto dont_show_again = create_remember_checkbox(_L("Remember my choice."), this, _L("This option can be changed later in preferences, under 'Load Behaviour'."));
+    // auto dont_show_again = create_remember_checkbox(_L("Remember my choice."), this, _L("This option can be changed later in preferences, under 'Load Behavior'."));
     // m_sizer_left->Add(dont_show_again, 0, wxALL, 5);
     //
     // m_sizer_bottom->Add(m_sizer_left, 0, wxEXPAND, 5);
@@ -17980,7 +17975,7 @@ bool Plater::load_files(const wxArrayString& filenames)
 
     // Orca: Iters through given paths and imports files from zip then remove zip from paths
     // returns true if zip files were found
-    auto handle_zips = [this](vector<fs::path>& paths) { // NOLINT(*-no-recursion) - Recursion is intended and should be managed properly
+    auto handle_zips = [this](std::vector<fs::path>& paths) { // NOLINT(*-no-recursion) - Recursion is intended and should be managed properly
         bool res = false;
         for (auto it = paths.begin(); it != paths.end();) {
             if (boost::algorithm::iends_with(it->string(), ".zip")) {
@@ -20545,7 +20540,7 @@ void Plater::on_filaments_delete(size_t num_filaments, size_t filament_id, int r
 
     // update customize gcode
     for (auto item = p->model.plates_custom_gcodes.begin(); item != p->model.plates_custom_gcodes.end(); ++item) {
-        auto iter = std::remove_if(item->second.gcodes.begin(), item->second.gcodes.end(), [filament_id](const Item& gcode_item) {
+        auto iter = std::remove_if(item->second.gcodes.begin(), item->second.gcodes.end(), [filament_id](const CustomGCode::Item& gcode_item) {
             return (gcode_item.type == CustomGCode::Type::ToolChange && gcode_item.extruder == filament_id + 1);
         });
         if (replace_filament_id == -1)
